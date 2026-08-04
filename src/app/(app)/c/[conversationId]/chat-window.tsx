@@ -22,12 +22,21 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<BlobPart[]>([])
   const imageInputRef = useRef<HTMLInputElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     return () => {
       window.speechSynthesis.cancel()
     }
   }, [])
+
+  // Runs on every messages change, including each streamed chunk (each one
+  // is its own setMessages call), so the view keeps following a reply as it
+  // streams in rather than only jumping down once at the end.
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (container) container.scrollTop = container.scrollHeight
+  }, [messages])
 
   // Separate effect (rather than folding into the mount-only one above) so
   // the cleanup always sees the current pendingImage rather than a stale
@@ -245,7 +254,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
         </button>
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto">
+      <div ref={messagesContainerRef} className="flex-1 space-y-3 overflow-y-auto">
         {messages.map((m) => (
           <div
             key={m.id}
