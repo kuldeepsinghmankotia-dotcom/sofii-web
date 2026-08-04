@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 
-const SIZE = 96
+const DEFAULT_SIZE = 96
 
 /**
  * Real-time audio-reactive orb for the recording state: a glowing gradient
@@ -12,13 +12,20 @@ const SIZE = 96
  * frame nature of a live audio visualization is exactly the "generative,
  * per-frame" case Canvas suits better than hand-authored path animation.
  */
-export default function VoiceOrb({ stream }: { stream: MediaStream }) {
+export default function VoiceOrb({
+  stream,
+  size = DEFAULT_SIZE
+}: {
+  stream: MediaStream
+  size?: number
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
+    const SIZE = size
     const dpr = window.devicePixelRatio || 1
     canvas.width = SIZE * dpr
     canvas.height = SIZE * dpr
@@ -61,6 +68,7 @@ export default function VoiceOrb({ stream }: { stream: MediaStream }) {
       // Jarvis-style rings: two arcs, counter-rotating, independent of
       // amplitude (ambient motion) so the orb never looks fully static
       // between spikes of speech.
+      const scale = SIZE / DEFAULT_SIZE
       ;[SIZE * 0.42, SIZE * 0.35].forEach((r, i) => {
         ctx.save()
         ctx.translate(cx, cy)
@@ -68,7 +76,7 @@ export default function VoiceOrb({ stream }: { stream: MediaStream }) {
         ctx.beginPath()
         ctx.arc(0, 0, r, 0, Math.PI * 1.3)
         ctx.strokeStyle = i === 0 ? 'rgba(96,165,250,0.55)' : 'rgba(167,139,250,0.4)'
-        ctx.lineWidth = 2
+        ctx.lineWidth = 2 * scale
         ctx.lineCap = 'round'
         ctx.stroke()
         ctx.restore()
@@ -80,7 +88,7 @@ export default function VoiceOrb({ stream }: { stream: MediaStream }) {
       const radius = baseRadius * (1 + smoothedLevel * 0.5)
 
       ctx.save()
-      ctx.shadowBlur = 18 + smoothedLevel * 30
+      ctx.shadowBlur = (18 + smoothedLevel * 30) * scale
       ctx.shadowColor = 'rgba(129,140,248,0.9)'
 
       const gradient = ctx.createRadialGradient(cx, cy, radius * 0.1, cx, cy, radius)
@@ -101,12 +109,12 @@ export default function VoiceOrb({ stream }: { stream: MediaStream }) {
       source.disconnect()
       void audioCtx.close()
     }
-  }, [stream])
+  }, [stream, size])
 
   return (
     <canvas
       ref={canvasRef}
-      style={{ width: SIZE, height: SIZE }}
+      style={{ width: size, height: size }}
       className="shrink-0"
       aria-hidden="true"
     />

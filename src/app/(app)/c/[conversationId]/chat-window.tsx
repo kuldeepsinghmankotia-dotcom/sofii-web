@@ -310,12 +310,16 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       )}
 
       {isRecording && micStream ? (
-        <div className="mt-4 flex items-center justify-center gap-4 rounded-lg bg-neutral-900 py-3">
-          <VoiceOrb stream={micStream} />
+        // Fixed, viewport-centered overlay (not just centered within the
+        // composer strip) — a full "voice mode" takeover like Gemini
+        // Live/Jarvis, not a small inline indicator.
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-black/90 backdrop-blur-sm">
+          <VoiceOrb stream={micStream} size={260} />
+          <p className="text-sm text-neutral-400">Listening…</p>
           <button
             onClick={toggleRecording}
             title="Stop recording"
-            className="rounded-full bg-red-600 px-5 py-2 text-sm font-medium"
+            className="rounded-full bg-red-600 px-8 py-3 font-medium"
           >
             Stop
           </button>
