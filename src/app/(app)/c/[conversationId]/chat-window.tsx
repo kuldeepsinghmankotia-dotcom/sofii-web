@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { resizeImageToJpeg } from '@/lib/image/resize'
 import type { ChatMessage } from '@/lib/db/messages'
 
 type Props = {
@@ -56,12 +57,25 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     ])
   }
 
-  const handleImageSelect = (e: ChangeEvent<HTMLInputElement>): void => {
+  const handleImageSelect = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0]
-    if (!file) return
-    if (pendingImage) URL.revokeObjectURL(pendingImage.previewUrl)
-    setPendingImage({ file, previewUrl: URL.createObjectURL(file) })
     e.target.value = ''
+    if (!file) return
+
+    setUploadingImage(true)
+    try {
+      // Resizing (not just re-encoding) matters even for a single message:
+      // an unresized full-resolution phone photo alone can exceed Groq's
+      // vision-model token budget — verified live in production.
+      const resized = await resizeImageToJpeg(file)
+      if (pendingImage) URL.revokeObjectURL(pendingImage.previewUrl)
+      setPendingImage({ file: resized, previewUrl: URL.createObjectURL(resized) })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      addSystemNote(message)
+    } finally {
+      setUploadingImage(false)
+    }
   }
 
   const clearPendingImage = (): void => {

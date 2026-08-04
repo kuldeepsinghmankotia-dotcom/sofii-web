@@ -43,11 +43,11 @@ interface AccumulatedToolCall {
   argumentsJson: string
 }
 
-function toContentParam(message: {
-  content: string
-  image_url: string | null
-}): string | ChatCompletionContentPart[] {
-  if (!message.image_url) return message.content
+function toContentParam(
+  message: { content: string; image_url: string | null },
+  includeImage: boolean
+): string | ChatCompletionContentPart[] {
+  if (!message.image_url || !includeImage) return message.content
   return [
     { type: 'text', text: message.content },
     { type: 'image_url', image_url: { url: message.image_url } }
@@ -218,10 +218,18 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   // openai/gpt-oss-120b (the default text model) rejects vision content
-  // outright, so the whole turn switches to a vision-capable model the
-  // moment an image shows up anywhere in context — including earlier in
-  // the conversation, so the model doesn't lose track of an image the user
-  // referenced a few messages back.
+  // outright, so a turn with a new image switches to a vision-capable
+  // model. Deliberately scoped to ONLY the current message's image, not any
+  // image earlier in history — a real production bug, found live: a
+  // full-resolution photo (unlike the small test images used to build this)
+  // costs vastly more tokens, and re-sending it as vision content on every
+  // subsequent turn (the original approach, meant to let the model "still
+  // see" an image referenced a few messages back) blew through Groq's 8000
+  // TPM limit for the vision model and broke every later message in that
+  // conversation, image-related or not. Past image messages replay as
+  // plain text below — the assistant's own prior reply already captured
+  // what was in the image, so that context isn't actually lost, just not
+  // re-paid for in image tokens every turn.
   const currentMessage: ChatMessage = {
     id: '',
     role: 'user',
@@ -230,7 +238,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     image_url: imageUrl ?? null
   }
   const conversationMessages = [...history, currentMessage]
-  const usesVision = conversationMessages.some((m) => m.image_url)
+  const usesVision = !!imageUrl
 
   // 3072 rather than 2048: verified live that reasoning length varies run to
   // run for the same image (794 reasoning tokens one call, 500+ truncated
@@ -243,7 +251,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   const baseMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
     ...conversationMessages.map(
-      (m) => ({ role: m.role, content: toContentParam(m) }) as ChatCompletionMessageParam
+      (m, i) =>
+        ({
+          role: m.role,
+          content: toContentParam(m, i === conversationMessages.length - 1)
+        }) as ChatCompletionMessageParam
     )
   ]
 
