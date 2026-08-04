@@ -69,5 +69,20 @@ export const TOOL_DEFINITIONS: ChatCompletionTool[] = [
         required: ['location']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_web',
+      description:
+        'Look up a quick factual answer, definition, or summary for a topic. IMPORTANT limitation: this only returns quick facts/knowledge-panel-style summaries, not general web search results, and often returns nothing for current-events, opinion, or highly specific queries. Only use it for well-defined factual lookups (e.g. "what is X", "who is Y"), and if it returns no result, tell the user a full web search is not available rather than guessing or making something up.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'The factual question or topic to look up.' }
+        },
+        required: ['query']
+      }
+    }
   }
 ]

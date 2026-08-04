@@ -3,6 +3,7 @@ import type { Database } from '@/types/database'
 import { createMemory } from '@/lib/db/memories'
 import { createReminder, listPendingReminders } from '@/lib/db/reminders'
 import { getWeather } from '@/lib/weather/weather'
+import { searchWeb } from '@/lib/search/duckduckgo'
 
 type Client = SupabaseClient<Database>
 
@@ -76,6 +77,18 @@ export async function executeToolCall(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return `Error fetching weather: ${message}`
+      }
+    }
+
+    case 'search_web': {
+      const query = typeof args.query === 'string' ? args.query.trim() : ''
+      if (!query) return 'Error: query is required.'
+
+      try {
+        return await searchWeb(query)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Error searching: ${message}`
       }
     }
 
