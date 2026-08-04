@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { resizeImageToJpeg } from '@/lib/image/resize'
+import VoiceOrb from './voice-orb'
 import type { ChatMessage } from '@/lib/db/messages'
 
 type Props = {
@@ -17,8 +18,12 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [speakEnabled, setSpeakEnabled] = useState(false)
-  const [pendingImage, setPendingImage] = useState<{ file: File; previewUrl: string } | null>(null)
+  const [pendingImage, setPendingImage] = useState<{
+    file: File
+    previewUrl: string
+  } | null>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [micStream, setMicStream] = useState<MediaStream | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<BlobPart[]>([])
   const imageInputRef = useRef<HTMLInputElement>(null)
@@ -78,7 +83,10 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       // vision-model token budget — verified live in production.
       const resized = await resizeImageToJpeg(file)
       if (pendingImage) URL.revokeObjectURL(pendingImage.previewUrl)
-      setPendingImage({ file: resized, previewUrl: URL.createObjectURL(resized) })
+      setPendingImage({
+        file: resized,
+        previewUrl: URL.createObjectURL(resized)
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       addSystemNote(message)
@@ -116,7 +124,9 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
           const path = `${user.id}/${crypto.randomUUID()}.${ext}`
           const { error } = await supabase.storage
             .from('chat-images')
-            .upload(path, imageToUpload.file, { contentType: imageToUpload.file.type })
+            .upload(path, imageToUpload.file, {
+              contentType: imageToUpload.file.type
+            })
 
           if (error) throw error
 
@@ -197,8 +207,11 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
+      const recorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      })
       audioChunksRef.current = []
+      setMicStream(stream)
 
       recorder.ondataavailable = (e): void => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data)
@@ -206,6 +219,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
 
       recorder.onstop = async (): Promise<void> => {
         stream.getTracks().forEach((track) => track.stop())
+        setMicStream(null)
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
 
         setIsTranscribing(true)
@@ -279,55 +293,74 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       {pendingImage && (
         <div className="mt-3 flex items-center gap-2 rounded-lg bg-neutral-800 p-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={pendingImage.previewUrl} alt="To send" className="h-12 w-12 rounded object-cover" />
+          <img
+            src={pendingImage.previewUrl}
+            alt="To send"
+            className="h-12 w-12 rounded object-cover"
+          />
           <span className="flex-1 truncate text-sm text-neutral-300">{pendingImage.file.name}</span>
-          <button onClick={clearPendingImage} title="Remove image" className="text-neutral-400 hover:text-neutral-200">
+          <button
+            onClick={clearPendingImage}
+            title="Remove image"
+            className="text-neutral-400 hover:text-neutral-200"
+          >
             ✕
           </button>
         </div>
       )}
 
-      <div className="mt-4 flex gap-2">
-        <button
-          onClick={toggleRecording}
-          disabled={isTranscribing}
-          title={isRecording ? 'Stop recording' : 'Start recording'}
-          className={`rounded-lg px-4 py-3 font-medium disabled:opacity-60 ${
-            isRecording ? 'bg-red-600' : 'bg-neutral-800'
-          }`}
-        >
-          {isRecording ? '⏹' : '🎙️'}
-        </button>
-        <button
-          onClick={() => imageInputRef.current?.click()}
-          disabled={uploadingImage}
-          title="Attach an image"
-          className="rounded-lg bg-neutral-800 px-4 py-3 font-medium disabled:opacity-60"
-        >
-          🖼️
-        </button>
-        <input
-          ref={imageInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleImageSelect}
-          className="hidden"
-        />
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type your message..."
-          className="flex-1 rounded-lg bg-neutral-800 p-3 outline-none"
-        />
-        <button
-          onClick={() => sendMessage()}
-          disabled={sending || uploadingImage}
-          className="rounded-lg bg-blue-600 px-5 py-3 font-medium disabled:opacity-60"
-        >
-          {uploadingImage ? 'Uploading…' : 'Send'}
-        </button>
-      </div>
+      {isRecording && micStream ? (
+        <div className="mt-4 flex items-center justify-center gap-4 rounded-lg bg-neutral-900 py-3">
+          <VoiceOrb stream={micStream} />
+          <button
+            onClick={toggleRecording}
+            title="Stop recording"
+            className="rounded-full bg-red-600 px-5 py-2 text-sm font-medium"
+          >
+            Stop
+          </button>
+        </div>
+      ) : (
+        <div className="mt-4 flex gap-2">
+          <button
+            onClick={toggleRecording}
+            disabled={isTranscribing}
+            title="Start recording"
+            className="rounded-lg bg-neutral-800 px-4 py-3 font-medium disabled:opacity-60"
+          >
+            🎙️
+          </button>
+          <button
+            onClick={() => imageInputRef.current?.click()}
+            disabled={uploadingImage}
+            title="Attach an image"
+            className="rounded-lg bg-neutral-800 px-4 py-3 font-medium disabled:opacity-60"
+          >
+            🖼️
+          </button>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageSelect}
+            className="hidden"
+          />
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Type your message..."
+            className="flex-1 rounded-lg bg-neutral-800 p-3 outline-none"
+          />
+          <button
+            onClick={() => sendMessage()}
+            disabled={sending || uploadingImage}
+            className="rounded-lg bg-blue-600 px-5 py-3 font-medium disabled:opacity-60"
+          >
+            {uploadingImage ? 'Uploading…' : 'Send'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
