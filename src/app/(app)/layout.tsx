@@ -32,6 +32,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <Link href="/reminders" className="hover:text-white">
               Reminders
             </Link>
+            <Link href="/documents" className="hover:text-white">
+              Documents
+            </Link>
           </nav>
         </div>
         <div className="flex items-center gap-4 text-sm text-neutral-400">

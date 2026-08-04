@@ -18,6 +18,8 @@ import {
 import { insertMessage, listMessages } from '@/lib/db/messages'
 import { listMemories } from '@/lib/db/memories'
 import { rankMemoriesByRelevance } from '@/lib/memory/ranking'
+import { hasAnyDocuments, matchDocumentChunks } from '@/lib/db/documents'
+import { embedText } from '@/lib/gemini/embeddings'
 import { TOOL_DEFINITIONS } from '@/lib/tools/definitions'
 import { executeToolCall } from '@/lib/tools/execute'
 import { getGroqClient, getGroqModel, SUPPRESS_REASONING, SYSTEM_PROMPT } from '@/lib/groq/client'
@@ -25,6 +27,7 @@ import type { GroqReasoningParams } from '@/lib/groq/client'
 
 type Client = SupabaseClient<Database>
 const MEMORY_RECALL_LIMIT = 5
+const DOCUMENT_RECALL_LIMIT = 5
 
 interface AccumulatedToolCall {
   id: string
@@ -156,13 +159,32 @@ export async function POST(request: NextRequest): Promise<Response> {
     MEMORY_RECALL_LIMIT
   )
 
+  // Skips the embedding API round-trip entirely when the user has never
+  // uploaded a document — the common case, and no point paying that latency
+  // (or Gemini quota) for a search that can only come back empty.
+  let relevantChunks: { document_id: string; content: string }[] = []
+  if (await hasAnyDocuments(supabase)) {
+    try {
+      const queryEmbedding = await embedText(content)
+      relevantChunks = await matchDocumentChunks(supabase, queryEmbedding, DOCUMENT_RECALL_LIMIT)
+    } catch (error) {
+      // Document recall is a bonus, not a hard dependency — a Gemini outage
+      // shouldn't take down chat entirely.
+      console.error('Document recall error:', error)
+    }
+  }
+
   // The model needs "now" to resolve relative times ("in 10 minutes",
   // "tomorrow at 5pm") into the absolute ISO timestamp create_reminder needs.
-  const systemPromptWithTime = `${SYSTEM_PROMPT}\n\nThe current date and time is ${new Date().toString()}.`
-  const systemPrompt =
-    relevantMemories.length > 0
-      ? `${systemPromptWithTime}\n\nThings you remember about the user (only mention if relevant):\n${relevantMemories.map((m) => `- ${m.content}`).join('\n')}`
-      : systemPromptWithTime
+  let systemPrompt = `${SYSTEM_PROMPT}\n\nThe current date and time is ${new Date().toString()}.`
+
+  if (relevantMemories.length > 0) {
+    systemPrompt += `\n\nThings you remember about the user (only mention if relevant):\n${relevantMemories.map((m) => `- ${m.content}`).join('\n')}`
+  }
+
+  if (relevantChunks.length > 0) {
+    systemPrompt += `\n\nRelevant excerpts from the user's uploaded documents (cite naturally, don't fabricate beyond what's here):\n${relevantChunks.map((c) => `- ${c.content}`).join('\n\n')}`
+  }
 
   const baseMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
