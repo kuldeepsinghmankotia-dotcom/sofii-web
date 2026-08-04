@@ -43,19 +43,29 @@ export const SUPPRESS_REASONING: GroqReasoningParams = {
 // something fixable at the integration layer.
 export const VISION_MODEL = 'qwen/qwen3.6-27b'
 
-// A different reasoning model family with a different suppression knob —
-// this one uses `reasoning_format` (parsed/raw/hidden), not
-// reasoning_effort/include_reasoning. Same underlying hazard as
-// SUPPRESS_REASONING though, confirmed live: with reasoning_format hidden
-// and a tight max_tokens, all of it still went to reasoning_tokens and
-// content came back empty with finish_reason "length" — so callers using
-// VISION_MODEL still need generous max_tokens headroom.
+// A different reasoning model family with different suppression knobs.
+// `reasoning_format: 'hidden'` alone (this model's equivalent of gpt-oss's
+// include_reasoning: false) only hides reasoning from the response — it
+// does NOT bound how much of it gets generated, and that turned out to
+// scale with image complexity in a way no fixed max_tokens ceiling could
+// safely absorb: verified live in production, a real (non-synthetic) photo
+// exhausted a 3072-token budget entirely on reasoning, twice, at different
+// budget sizes, with zero visible output both times. gpt-oss's
+// `reasoning_effort: 'low'` doesn't apply here either — this model rejects
+// every value except 'none' and 'default'. `reasoning_effort: 'none'` is
+// the actual fix: it disables reasoning generation altogether rather than
+// just hiding an unbounded amount of it, confirmed live (774 completion
+// tokens total, well inside a 1024 budget, for a request that had
+// previously exhausted 3072 tokens of hidden reasoning with nothing left
+// for the answer).
 export interface GroqVisionReasoningParams {
   reasoning_format?: 'parsed' | 'raw' | 'hidden'
+  reasoning_effort?: 'none' | 'default'
 }
 
 export const SUPPRESS_VISION_REASONING: GroqVisionReasoningParams = {
-  reasoning_format: 'hidden'
+  reasoning_format: 'hidden',
+  reasoning_effort: 'none'
 }
 
 let client: OpenAI | undefined

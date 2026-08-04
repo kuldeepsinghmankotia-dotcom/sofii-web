@@ -240,12 +240,15 @@ export async function POST(request: NextRequest): Promise<Response> {
   const conversationMessages = [...history, currentMessage]
   const usesVision = !!imageUrl
 
-  // 3072 rather than 2048: verified live that reasoning length varies run to
-  // run for the same image (794 reasoning tokens one call, 500+ truncated
-  // with zero visible output on another), so this is deliberate headroom
-  // above the worst case actually observed, not just a round number.
+  // 1536 is real headroom now that SUPPRESS_VISION_REASONING includes
+  // reasoning_effort: 'none' — reasoning is disabled outright rather than
+  // just hidden, so this budget only has to cover the actual visible
+  // description (774 completion tokens observed for a detailed real photo).
+  // Bumping max_tokens alone was tried first and failed: with reasoning
+  // merely hidden (not disabled), a 3072-token budget was still exhausted
+  // entirely by reasoning on a real photo, twice, at different sizes.
   const model = usesVision
-    ? { name: VISION_MODEL, maxTokens: 3072, reasoning: SUPPRESS_VISION_REASONING }
+    ? { name: VISION_MODEL, maxTokens: 1536, reasoning: SUPPRESS_VISION_REASONING }
     : { name: getGroqModel(), maxTokens: 1024, reasoning: SUPPRESS_REASONING }
 
   const baseMessages: ChatCompletionMessageParam[] = [
