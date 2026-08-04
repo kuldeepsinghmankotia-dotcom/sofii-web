@@ -4,6 +4,10 @@ import { createMemory } from '@/lib/db/memories'
 import { createReminder, listPendingReminders } from '@/lib/db/reminders'
 import { getWeather } from '@/lib/weather/weather'
 import { searchWeb } from '@/lib/search/duckduckgo'
+import { createCalendarEvent, getValidAccessToken, listUpcomingEvents } from '@/lib/google/calendar'
+
+const CALENDAR_NOT_CONNECTED =
+  'Google Calendar is not connected. Tell the user to connect it on the Calendar page.'
 
 type Client = SupabaseClient<Database>
 
@@ -89,6 +93,45 @@ export async function executeToolCall(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return `Error searching: ${message}`
+      }
+    }
+
+    case 'list_calendar_events': {
+      try {
+        const accessToken = await getValidAccessToken(supabase)
+        if (!accessToken) return CALENDAR_NOT_CONNECTED
+
+        const events = await listUpcomingEvents(accessToken)
+        if (events.length === 0) return 'No upcoming calendar events.'
+
+        return events
+          .map((e) => `- "${e.summary}" at ${new Date(e.start).toLocaleString()}`)
+          .join('\n')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Error fetching calendar events: ${message}`
+      }
+    }
+
+    case 'create_calendar_event': {
+      const summary = typeof args.summary === 'string' ? args.summary.trim() : ''
+      const startIso = typeof args.start_iso === 'string' ? args.start_iso : ''
+      const endIso = typeof args.end_iso === 'string' ? args.end_iso : ''
+      const description = typeof args.description === 'string' ? args.description : undefined
+
+      if (!summary) return 'Error: summary is required.'
+      if (Number.isNaN(Date.parse(startIso))) return `Error: could not parse "${startIso}" as a date.`
+      if (Number.isNaN(Date.parse(endIso))) return `Error: could not parse "${endIso}" as a date.`
+
+      try {
+        const accessToken = await getValidAccessToken(supabase)
+        if (!accessToken) return CALENDAR_NOT_CONNECTED
+
+        const event = await createCalendarEvent(accessToken, { summary, startIso, endIso, description })
+        return `Calendar event created: "${event.summary}" at ${new Date(event.start).toLocaleString()}.`
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Error creating calendar event: ${message}`
       }
     }
 

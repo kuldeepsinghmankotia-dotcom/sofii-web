@@ -84,5 +84,43 @@ export const TOOL_DEFINITIONS: ChatCompletionTool[] = [
         required: ['query']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_calendar_events',
+      description:
+        "List the user's upcoming Google Calendar events. Use this when the user asks what's on their calendar or schedule. If the user hasn't connected Google Calendar, this returns a message telling them to connect it on the Calendar page — pass that along rather than pretending you checked.",
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: []
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_calendar_event',
+      description:
+        "Create an event on the user's Google Calendar. Use this when the user asks to schedule, book, or add something to their calendar. If the user hasn't connected Google Calendar, this returns a message telling them to connect it on the Calendar page.",
+      parameters: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string', description: 'Short event title.' },
+          start_iso: {
+            type: 'string',
+            description:
+              'ISO 8601 datetime (with timezone offset) for the event start. Resolve relative times using the current date/time given in the system prompt.'
+          },
+          end_iso: {
+            type: 'string',
+            description: 'ISO 8601 datetime (with timezone offset) for the event end.'
+          },
+          description: { type: 'string', description: 'Optional longer event description.' }
+        },
+        required: ['summary', 'start_iso', 'end_iso']
+      }
+    }
   }
 ]
