@@ -238,7 +238,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="mb-2 flex justify-end">
         <button
           onClick={() =>
