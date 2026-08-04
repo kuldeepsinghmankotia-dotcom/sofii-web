@@ -123,7 +123,9 @@ export type Database = {
           created_at: string
           embedding: string | null
           id: string
+          last_used_at: string | null
           updated_at: string
+          use_count: number
           user_id: string
         }
         Insert: {
@@ -131,7 +133,9 @@ export type Database = {
           created_at?: string
           embedding?: string | null
           id?: string
+          last_used_at?: string | null
           updated_at?: string
+          use_count?: number
           user_id: string
         }
         Update: {
@@ -139,7 +143,9 @@ export type Database = {
           created_at?: string
           embedding?: string | null
           id?: string
+          last_used_at?: string | null
           updated_at?: string
+          use_count?: number
           user_id?: string
         }
         Relationships: []
@@ -232,6 +238,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      increment_memory_usage: {
+        Args: { memory_ids: string[] }
+        Returns: undefined
+      }
       match_document_chunks: {
         Args: { match_count?: number; query_embedding: string }
         Returns: {

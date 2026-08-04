@@ -16,7 +16,7 @@ import {
   touchConversation
 } from '@/lib/db/conversations'
 import { insertMessage, listMessages } from '@/lib/db/messages'
-import { listMemories } from '@/lib/db/memories'
+import { listMemories, recordMemoryUsage } from '@/lib/db/memories'
 import { rankMemoriesByRelevance } from '@/lib/memory/ranking'
 import { hasAnyDocuments, matchDocumentChunks } from '@/lib/db/documents'
 import { embedText } from '@/lib/gemini/embeddings'
@@ -158,6 +158,15 @@ export async function POST(request: NextRequest): Promise<Response> {
     content,
     MEMORY_RECALL_LIMIT
   )
+
+  if (relevantMemories.length > 0) {
+    // Usage tracking is a bonus for the Memories page's "explainable
+    // retrieval" display, not something a chat reply should ever fail over.
+    recordMemoryUsage(
+      supabase,
+      relevantMemories.map((m) => m.id)
+    ).catch((error) => console.error('Memory usage tracking error:', error))
+  }
 
   // Skips the embedding API round-trip entirely when the user has never
   // uploaded a document — the common case, and no point paying that latency
