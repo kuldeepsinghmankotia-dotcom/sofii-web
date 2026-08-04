@@ -23,6 +23,16 @@ export async function listPendingReminders(supabase: Client): Promise<Reminder[]
   return data as Reminder[]
 }
 
+export async function listAllReminders(supabase: Client): Promise<Reminder[]> {
+  const { data, error } = await supabase
+    .from('reminders')
+    .select('id, content, scheduled_at, status')
+    .order('scheduled_at', { ascending: true })
+
+  if (error) throw error
+  return data as Reminder[]
+}
+
 export async function createReminder(
   supabase: Client,
   params: { userId: string; content: string; scheduledAt: string }
@@ -55,4 +65,14 @@ export async function claimDueReminders(supabase: Client): Promise<Reminder[]> {
 
   if (error) throw error
   return data as Reminder[]
+}
+
+export async function cancelReminder(supabase: Client, id: string): Promise<void> {
+  const { error } = await supabase.from('reminders').update({ status: 'cancelled' }).eq('id', id)
+  if (error) throw error
+}
+
+export async function deleteReminder(supabase: Client, id: string): Promise<void> {
+  const { error } = await supabase.from('reminders').delete().eq('id', id)
+  if (error) throw error
 }

@@ -33,3 +33,24 @@ export async function createMemory(
   if (error) throw error
   return data
 }
+
+export async function updateMemory(
+  supabase: Client,
+  id: string,
+  content: string
+): Promise<Memory> {
+  const { data, error } = await supabase
+    .from('memories')
+    .update({ content, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('id, content, created_at, updated_at')
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteMemory(supabase: Client, id: string): Promise<void> {
+  const { error } = await supabase.from('memories').delete().eq('id', id)
+  if (error) throw error
+}

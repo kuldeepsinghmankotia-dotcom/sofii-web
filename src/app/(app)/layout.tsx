@@ -18,9 +18,22 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-black text-white">
       <header className="flex items-center justify-between border-b border-neutral-800 px-6 py-4">
-        <Link href="/" className="font-bold">
-          🤖 Sofii
-        </Link>
+        <div className="flex items-center gap-6">
+          <Link href="/" className="font-bold">
+            🤖 Sofii
+          </Link>
+          <nav className="flex items-center gap-4 text-sm text-neutral-300">
+            <Link href="/" className="hover:text-white">
+              Chat
+            </Link>
+            <Link href="/memories" className="hover:text-white">
+              Memories
+            </Link>
+            <Link href="/reminders" className="hover:text-white">
+              Reminders
+            </Link>
+          </nav>
+        </div>
         <div className="flex items-center gap-4 text-sm text-neutral-400">
           <span>{user.email}</span>
           <SignOutButton />
