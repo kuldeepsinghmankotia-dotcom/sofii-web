@@ -31,6 +31,28 @@ export const SUPPRESS_REASONING: GroqReasoningParams = {
   include_reasoning: false
 }
 
+// The default text model (openai/gpt-oss-120b) rejects vision content
+// outright ("messages[0].content must be a string" — verified live), so any
+// turn with an image anywhere in context switches to this model instead.
+// Picked by testing every model Groq's /models endpoint currently lists: it
+// was the only one that accepted an image_url content part.
+export const VISION_MODEL = 'qwen/qwen3.6-27b'
+
+// A different reasoning model family with a different suppression knob —
+// this one uses `reasoning_format` (parsed/raw/hidden), not
+// reasoning_effort/include_reasoning. Same underlying hazard as
+// SUPPRESS_REASONING though, confirmed live: with reasoning_format hidden
+// and a tight max_tokens, all of it still went to reasoning_tokens and
+// content came back empty with finish_reason "length" — so callers using
+// VISION_MODEL still need generous max_tokens headroom.
+export interface GroqVisionReasoningParams {
+  reasoning_format?: 'parsed' | 'raw' | 'hidden'
+}
+
+export const SUPPRESS_VISION_REASONING: GroqVisionReasoningParams = {
+  reasoning_format: 'hidden'
+}
+
 let client: OpenAI | undefined
 
 // Constructed lazily (on first real use) rather than at module-load time, so

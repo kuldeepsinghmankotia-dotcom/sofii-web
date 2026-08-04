@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import type { ChatMessage } from '@/lib/db/messages'
 
 type Props = {
@@ -15,8 +16,11 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [speakEnabled, setSpeakEnabled] = useState(false)
+  const [pendingImage, setPendingImage] = useState<{ file: File; previewUrl: string } | null>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<BlobPart[]>([])
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     return () => {
@@ -24,24 +28,93 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     }
   }, [])
 
+  // Separate effect (rather than folding into the mount-only one above) so
+  // the cleanup always sees the current pendingImage rather than a stale
+  // closure over whatever it was at mount time.
+  useEffect(() => {
+    return () => {
+      if (pendingImage) URL.revokeObjectURL(pendingImage.previewUrl)
+    }
+  }, [pendingImage])
+
   const speak = (text: string): void => {
     if (!speakEnabled || !text.trim()) return
     window.speechSynthesis.cancel()
     window.speechSynthesis.speak(new SpeechSynthesisUtterance(text))
   }
 
+  const addSystemNote = (content: string): void => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content,
+        created_at: new Date().toISOString(),
+        image_url: null
+      }
+    ])
+  }
+
+  const handleImageSelect = (e: ChangeEvent<HTMLInputElement>): void => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (pendingImage) URL.revokeObjectURL(pendingImage.previewUrl)
+    setPendingImage({ file, previewUrl: URL.createObjectURL(file) })
+    e.target.value = ''
+  }
+
+  const clearPendingImage = (): void => {
+    if (pendingImage) URL.revokeObjectURL(pendingImage.previewUrl)
+    setPendingImage(null)
+  }
+
   const sendMessage = async (overrideContent?: string): Promise<void> => {
     const content = overrideContent ?? input
-    if (!content.trim() || sending) return
+    if ((!content.trim() && !pendingImage) || sending) return
 
     if (overrideContent === undefined) setInput('')
     setSending(true)
+
+    let imageUrl: string | undefined
+    const imageToUpload = pendingImage
+    clearPendingImage()
+
+    if (imageToUpload) {
+      setUploadingImage(true)
+      try {
+        const supabase = createClient()
+        const {
+          data: { user }
+        } = await supabase.auth.getUser()
+
+        if (user) {
+          const ext = imageToUpload.file.name.split('.').pop() || 'png'
+          const path = `${user.id}/${crypto.randomUUID()}.${ext}`
+          const { error } = await supabase.storage
+            .from('chat-images')
+            .upload(path, imageToUpload.file, { contentType: imageToUpload.file.type })
+
+          if (error) throw error
+
+          imageUrl = supabase.storage.from('chat-images').getPublicUrl(path).data.publicUrl
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        addSystemNote(`Image upload failed: ${message}`)
+        setSending(false)
+        setUploadingImage(false)
+        return
+      }
+      setUploadingImage(false)
+    }
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
       content,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      image_url: imageUrl ?? null
     }
 
     const assistantId = crypto.randomUUID()
@@ -49,7 +122,8 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       id: assistantId,
       role: 'assistant',
       content: '',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      image_url: null
     }
 
     setMessages((prev) => [...prev, userMessage, assistantPlaceholder])
@@ -57,7 +131,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationId, content })
+      body: JSON.stringify({ conversationId, content, imageUrl })
     })
 
     if (!response.ok || !response.body) {
@@ -89,18 +163,6 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter') sendMessage()
-  }
-
-  const addSystemNote = (content: string): void => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content,
-        created_at: new Date().toISOString()
-      }
-    ])
   }
 
   const toggleRecording = async (): Promise<void> => {
@@ -177,11 +239,30 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
               m.role === 'user' ? 'ml-auto bg-blue-600' : 'bg-neutral-800'
             }`}
           >
+            {m.image_url && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={m.image_url}
+                alt="Attached"
+                className="mb-2 max-h-64 max-w-full rounded-lg object-contain"
+              />
+            )}
             {m.content}
           </div>
         ))}
         {isTranscribing && <div className="ml-auto text-sm text-neutral-400">Transcribing…</div>}
       </div>
+
+      {pendingImage && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg bg-neutral-800 p-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={pendingImage.previewUrl} alt="To send" className="h-12 w-12 rounded object-cover" />
+          <span className="flex-1 truncate text-sm text-neutral-300">{pendingImage.file.name}</span>
+          <button onClick={clearPendingImage} title="Remove image" className="text-neutral-400 hover:text-neutral-200">
+            ✕
+          </button>
+        </div>
+      )}
 
       <div className="mt-4 flex gap-2">
         <button
@@ -194,6 +275,21 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
         >
           {isRecording ? '⏹' : '🎙️'}
         </button>
+        <button
+          onClick={() => imageInputRef.current?.click()}
+          disabled={uploadingImage}
+          title="Attach an image"
+          className="rounded-lg bg-neutral-800 px-4 py-3 font-medium disabled:opacity-60"
+        >
+          🖼️
+        </button>
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleImageSelect}
+          className="hidden"
+        />
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -203,10 +299,10 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
         />
         <button
           onClick={() => sendMessage()}
-          disabled={sending}
+          disabled={sending || uploadingImage}
           className="rounded-lg bg-blue-600 px-5 py-3 font-medium disabled:opacity-60"
         >
-          Send
+          {uploadingImage ? 'Uploading…' : 'Send'}
         </button>
       </div>
     </div>

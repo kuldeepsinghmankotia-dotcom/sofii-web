@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
+  ChatCompletionContentPart,
   ChatCompletionMessageParam,
   ChatCompletionTool,
   ChatCompletionToolChoiceOption
@@ -15,15 +16,22 @@ import {
   renameConversation,
   touchConversation
 } from '@/lib/db/conversations'
-import { insertMessage, listMessages } from '@/lib/db/messages'
+import { insertMessage, listMessages, type ChatMessage } from '@/lib/db/messages'
 import { listMemories, recordMemoryUsage } from '@/lib/db/memories'
 import { rankMemoriesByRelevance } from '@/lib/memory/ranking'
 import { hasAnyDocuments, matchDocumentChunks } from '@/lib/db/documents'
 import { embedText } from '@/lib/gemini/embeddings'
 import { TOOL_DEFINITIONS } from '@/lib/tools/definitions'
 import { executeToolCall } from '@/lib/tools/execute'
-import { getGroqClient, getGroqModel, SUPPRESS_REASONING, SYSTEM_PROMPT } from '@/lib/groq/client'
-import type { GroqReasoningParams } from '@/lib/groq/client'
+import {
+  getGroqClient,
+  getGroqModel,
+  SUPPRESS_REASONING,
+  SUPPRESS_VISION_REASONING,
+  SYSTEM_PROMPT,
+  VISION_MODEL
+} from '@/lib/groq/client'
+import type { GroqReasoningParams, GroqVisionReasoningParams } from '@/lib/groq/client'
 
 type Client = SupabaseClient<Database>
 const MEMORY_RECALL_LIMIT = 5
@@ -35,6 +43,17 @@ interface AccumulatedToolCall {
   argumentsJson: string
 }
 
+function toContentParam(message: {
+  content: string
+  image_url: string | null
+}): string | ChatCompletionContentPart[] {
+  if (!message.image_url) return message.content
+  return [
+    { type: 'text', text: message.content },
+    { type: 'image_url', image_url: { url: message.image_url } }
+  ]
+}
+
 /**
  * Runs one streamed completion call, forwarding content deltas via onContent
  * as they arrive and accumulating any tool_calls deltas (Groq has been
@@ -44,17 +63,18 @@ interface AccumulatedToolCall {
 async function streamOneRound(
   messages: ChatCompletionMessageParam[],
   toolOptions: { tools?: ChatCompletionTool[]; tool_choice?: ChatCompletionToolChoiceOption },
+  model: { name: string; maxTokens: number; reasoning: GroqReasoningParams | GroqVisionReasoningParams },
   onContent: (delta: string) => void
 ): Promise<AccumulatedToolCall[]> {
   const stream = await getGroqClient().chat.completions.create({
-    model: getGroqModel(),
+    model: model.name,
     messages,
     temperature: 0.7,
-    max_tokens: 1024,
+    max_tokens: model.maxTokens,
     stream: true,
-    ...SUPPRESS_REASONING,
+    ...model.reasoning,
     ...toolOptions
-  } as ChatCompletionCreateParamsStreaming & GroqReasoningParams)
+  } as ChatCompletionCreateParamsStreaming & GroqReasoningParams & GroqVisionReasoningParams)
 
   const toolCallsByIndex = new Map<number, AccumulatedToolCall>()
 
@@ -116,9 +136,10 @@ async function autoTitleConversation(
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
-  const { conversationId, content } = (await request.json()) as {
+  const { conversationId, content, imageUrl } = (await request.json()) as {
     conversationId?: string
     content?: string
+    imageUrl?: string
   }
 
   if (!conversationId || !content?.trim()) {
@@ -150,7 +171,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     conversationId,
     userId: user.id,
     role: 'user',
-    content
+    content,
+    imageUrl
   })
 
   const relevantMemories = rankMemoriesByRelevance(
@@ -195,10 +217,30 @@ export async function POST(request: NextRequest): Promise<Response> {
     systemPrompt += `\n\nRelevant excerpts from the user's uploaded documents (cite naturally, don't fabricate beyond what's here):\n${relevantChunks.map((c) => `- ${c.content}`).join('\n\n')}`
   }
 
+  // openai/gpt-oss-120b (the default text model) rejects vision content
+  // outright, so the whole turn switches to a vision-capable model the
+  // moment an image shows up anywhere in context — including earlier in
+  // the conversation, so the model doesn't lose track of an image the user
+  // referenced a few messages back.
+  const currentMessage: ChatMessage = {
+    id: '',
+    role: 'user',
+    content,
+    created_at: '',
+    image_url: imageUrl ?? null
+  }
+  const conversationMessages = [...history, currentMessage]
+  const usesVision = conversationMessages.some((m) => m.image_url)
+
+  const model = usesVision
+    ? { name: VISION_MODEL, maxTokens: 2048, reasoning: SUPPRESS_VISION_REASONING }
+    : { name: getGroqModel(), maxTokens: 1024, reasoning: SUPPRESS_REASONING }
+
   const baseMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
-    ...history.map((m) => ({ role: m.role, content: m.content }) as ChatCompletionMessageParam),
-    { role: 'user', content }
+    ...conversationMessages.map(
+      (m) => ({ role: m.role, content: toContentParam(m) }) as ChatCompletionMessageParam
+    )
   ]
 
   const stream = new ReadableStream<Uint8Array>({
@@ -215,6 +257,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         const toolCalls = await streamOneRound(
           baseMessages,
           { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
+          model,
           emit
         )
 
@@ -248,7 +291,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
           // Bounded to exactly one tool round: no `tools` option here, so
           // the model has nothing left to call and must produce a reply.
-          await streamOneRound(followUpMessages, {}, emit)
+          await streamOneRound(followUpMessages, {}, model, emit)
         }
       } catch (error) {
         console.error('Groq stream error:', error)

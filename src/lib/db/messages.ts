@@ -10,7 +10,10 @@ export interface ChatMessage {
   role: MessageRole
   content: string
   created_at: string
+  image_url: string | null
 }
+
+const MESSAGE_COLUMNS = 'id, role, content, created_at, image_url'
 
 export async function listMessages(
   supabase: Client,
@@ -18,7 +21,7 @@ export async function listMessages(
 ): Promise<ChatMessage[]> {
   const { data, error } = await supabase
     .from('messages')
-    .select('id, role, content, created_at')
+    .select(MESSAGE_COLUMNS)
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true })
 
@@ -28,7 +31,13 @@ export async function listMessages(
 
 export async function insertMessage(
   supabase: Client,
-  params: { conversationId: string; userId: string; role: MessageRole; content: string }
+  params: {
+    conversationId: string
+    userId: string
+    role: MessageRole
+    content: string
+    imageUrl?: string
+  }
 ): Promise<ChatMessage> {
   const { data, error } = await supabase
     .from('messages')
@@ -36,9 +45,10 @@ export async function insertMessage(
       conversation_id: params.conversationId,
       user_id: params.userId,
       role: params.role,
-      content: params.content
+      content: params.content,
+      image_url: params.imageUrl ?? null
     })
-    .select('id, role, content, created_at')
+    .select(MESSAGE_COLUMNS)
     .single()
 
   if (error) throw error
