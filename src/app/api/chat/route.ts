@@ -232,8 +232,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   const conversationMessages = [...history, currentMessage]
   const usesVision = conversationMessages.some((m) => m.image_url)
 
+  // 3072 rather than 2048: verified live that reasoning length varies run to
+  // run for the same image (794 reasoning tokens one call, 500+ truncated
+  // with zero visible output on another), so this is deliberate headroom
+  // above the worst case actually observed, not just a round number.
   const model = usesVision
-    ? { name: VISION_MODEL, maxTokens: 2048, reasoning: SUPPRESS_VISION_REASONING }
+    ? { name: VISION_MODEL, maxTokens: 3072, reasoning: SUPPRESS_VISION_REASONING }
     : { name: getGroqModel(), maxTokens: 1024, reasoning: SUPPRESS_REASONING }
 
   const baseMessages: ChatCompletionMessageParam[] = [

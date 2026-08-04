@@ -35,7 +35,12 @@ export const SUPPRESS_REASONING: GroqReasoningParams = {
 // outright ("messages[0].content must be a string" — verified live), so any
 // turn with an image anywhere in context switches to this model instead.
 // Picked by testing every model Groq's /models endpoint currently lists: it
-// was the only one that accepted an image_url content part.
+// was the only one that accepted an image_url content part. Known
+// limitation, not a bug to chase further: verified live that its visual
+// accuracy has real run-to-run variance on the same image (a two-tone test
+// image was described correctly on most runs but with a hallucinated extra
+// detail on one run) — expected from a small free vision model, not
+// something fixable at the integration layer.
 export const VISION_MODEL = 'qwen/qwen3.6-27b'
 
 // A different reasoning model family with a different suppression knob —
