@@ -27,7 +27,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <header className="flex shrink-0 items-center justify-between gap-2 overflow-x-auto border-b border-neutral-800 px-3 py-3 sm:px-6 sm:py-4">
         <div className="flex items-center gap-3 sm:gap-6">
           <Link href="/" className="shrink-0 font-bold">
-            🤖 Sofii
+            Sofii
           </Link>
           <nav className="flex shrink-0 items-center gap-3 text-sm text-neutral-300 sm:gap-4">
             <Link href="/" className="hover:text-white">
