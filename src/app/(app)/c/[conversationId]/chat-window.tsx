@@ -104,6 +104,19 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const [wakeWordEnabled, setWakeWordEnabled] = useState(false)
   const [isWakeListening, setIsWakeListening] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
+  // Spans an ENTIRE hands-free turn (wake word heard → recording →
+  // transcribing → sending → speaking → maybe another turn), set once at
+  // the start and cleared once at the true end — deliberately NOT derived
+  // from isRecording/isTranscribing/sending/isSpeaking individually. An
+  // earlier version gated the wake-word listener on those four flags
+  // directly, which flicker through brief all-false gaps *between* each
+  // stage of a single turn; each gap tore down and immediately recreated a
+  // new SpeechRecognition instance, and real-world testing showed Chrome's
+  // speech engine can get stuck after being cycled like that — it would
+  // listen once and then silently never fire another event. This single
+  // stable flag only changes twice per turn, so the listener only
+  // restarts once too.
+  const [voiceTurnActive, setVoiceTurnActive] = useState(false)
   const [pendingImage, setPendingImage] = useState<{
     file: File
     previewUrl: string
@@ -274,6 +287,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
         prev.map((m) => (m.id === assistantId ? { ...m, content: 'Something went wrong.' } : m))
       )
       setSending(false)
+      setVoiceTurnActive(false)
       return
     }
 
@@ -300,7 +314,11 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     // nothing, the VAD's own give-up timeout (see attachSilenceAutoStop)
     // drops this back to passive wake-word listening on its own.
     speak(fullContent, () => {
-      if (wakeWordEnabled) void startRecording({ autoStopOnSilence: true })
+      if (wakeWordEnabled) {
+        void startRecording({ autoStopOnSilence: true })
+      } else {
+        setVoiceTurnActive(false)
+      }
     })
   }
 
@@ -309,6 +327,15 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   }
 
   const startRecording = async (options?: { autoStopOnSilence?: boolean }): Promise<void> => {
+    // Set here (covering every hands-free recording, whatever triggered
+    // it — wake word, or an auto-continue after a reply to a typed
+    // message while Jarvis mode happens to be on) rather than only where
+    // the wake word is detected: that would leave a gap where this
+    // specific recording's later transcribing/sending stage isn't covered
+    // by voiceTurnActive, letting the wake-word listener incorrectly
+    // re-arm mid-turn.
+    if (options?.autoStopOnSilence) setVoiceTurnActive(true)
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream, {
@@ -330,8 +357,12 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
 
         // A hands-free session that timed out without anyone saying
         // anything doesn't need a Whisper call at all — this is known
-        // client-side already, no need to transcribe silence.
-        if (!heardSpeechRef.current) return
+        // client-side already, no need to transcribe silence. The turn is
+        // over either way: back to passive wake-word listening.
+        if (!heardSpeechRef.current) {
+          setVoiceTurnActive(false)
+          return
+        }
 
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
 
@@ -346,10 +377,17 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
           if (!response.ok) throw new Error(await response.text())
 
           const { text } = (await response.json()) as { text: string }
-          if (text.trim()) await sendMessage(text.trim())
+          if (text.trim()) {
+            // sendMessage clears voiceTurnActive itself once the whole
+            // reply (including speaking it) is done.
+            await sendMessage(text.trim())
+          } else {
+            setVoiceTurnActive(false)
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           addSystemNote(`Transcription failed: ${message}`)
+          setVoiceTurnActive(false)
         } finally {
           setIsTranscribing(false)
         }
@@ -371,6 +409,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       addSystemNote(`Microphone unavailable: ${message}`)
+      setVoiceTurnActive(false)
     }
   }
 
@@ -392,16 +431,22 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   }
 
   // Continuous "Sofii" wake-word listening. Only armed while nothing else
-  // voice-related is already happening — recording/transcribing/sending all
-  // pause it, and it re-arms itself once they finish. Chrome/Edge only (the
-  // Web Speech API isn't implemented elsewhere); this is the free, no-new-
-  // account path, at the cost of accuracy some dedicated wake-word engines
-  // would do better, and of continuous audio going to the browser's speech
-  // service while armed — a real, deliberate trade-off against this app's
-  // previous push-to-talk-only design, made explicitly at the user's
-  // request.
+  // voice-related is already happening. isRecording and voiceTurnActive
+  // (rather than the individual isTranscribing/sending flags — see that
+  // state's own comment for why) cover a hands-free turn end to end; isSpeaking
+  // is still needed on top of those for one edge case they don't cover: a
+  // MANUALLY push-to-talk-recorded message while Jarvis mode also happens
+  // to be enabled doesn't set voiceTurnActive at all, so without isSpeaking
+  // here the listener would re-arm and could pick up Sofii's own spoken
+  // reply to that manual message. Re-arms once whichever of these caused
+  // the pause finishes. Chrome/Edge only (the Web Speech API isn't
+  // implemented elsewhere); this is the free, no-new-account path, at the
+  // cost of accuracy some dedicated wake-word engines would do better, and
+  // of continuous audio going to the browser's speech service while armed
+  // — a real, deliberate trade-off against this app's previous
+  // push-to-talk-only design, made explicitly at the user's request.
   useEffect(() => {
-    if (!wakeWordEnabled || isRecording || isTranscribing || sending || isSpeaking) {
+    if (!wakeWordEnabled || isRecording || voiceTurnActive || isSpeaking) {
       recognitionRef.current?.stop()
       recognitionRef.current = null
       // Deferred rather than called synchronously in the effect body —
@@ -449,6 +494,8 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
         if (stopped) return
         if (heard) {
           setIsWakeListening(false)
+          // startRecording itself sets voiceTurnActive when
+          // autoStopOnSilence is requested — see its own comment.
           void startRecording({ autoStopOnSilence: true })
         } else {
           arm()
@@ -471,7 +518,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       recognitionRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wakeWordEnabled, isRecording, isTranscribing, sending, isSpeaking])
+  }, [wakeWordEnabled, isRecording, voiceTurnActive, isSpeaking])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
