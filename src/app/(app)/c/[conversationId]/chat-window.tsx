@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import { createClient } from '@/lib/supabase/client'
 import { resizeImageToJpeg } from '@/lib/image/resize'
 import VoiceOrb from './voice-orb'
+import { notifyConversationsChanged } from '../../sidebar'
 import type { ChatMessage } from '@/lib/db/messages'
 
 type Props = {
@@ -241,6 +242,11 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     const content = overrideContent ?? input
     if ((!content.trim() && !pendingImage) || sending) return
 
+    // Captured before this turn's messages are pushed: whether the sidebar
+    // should expect a server-side auto-title rename once this reply lands
+    // (see the delayed notifyConversationsChanged() below).
+    const isFirstMessage = messages.length === 0
+
     if (overrideContent === undefined) setInput('')
     setSending(true)
 
@@ -329,6 +335,16 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     }
 
     setSending(false)
+
+    // Bumps this conversation to the top of the sidebar's list right away.
+    // If this was the conversation's first exchange, the server also
+    // auto-titles it (api/chat/route.ts, after this response stream already
+    // closed) — there's no signal back to the client for exactly when that
+    // finishes, so a second, delayed notify catches it heuristically rather
+    // than the sidebar showing "New conversation" until its next unrelated
+    // refresh.
+    notifyConversationsChanged()
+    if (isFirstMessage) setTimeout(notifyConversationsChanged, 2500)
 
     // In hands-free mode, keep the conversation going after the spoken
     // reply finishes — a real Jarvis-style back-and-forth instead of

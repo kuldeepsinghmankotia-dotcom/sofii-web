@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { notifyConversationsChanged } from './sidebar'
 
 export default function NewConversationButton() {
   const router = useRouter()
@@ -31,6 +32,7 @@ export default function NewConversationButton() {
 
     if (error || !data) return
 
+    notifyConversationsChanged()
     router.push(`/c/${data.id}`)
   }
 

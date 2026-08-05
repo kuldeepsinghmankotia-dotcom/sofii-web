@@ -53,3 +53,9 @@ export async function renameConversation(
 
   if (error) throw error
 }
+
+export async function deleteConversation(supabase: Client, conversationId: string): Promise<void> {
+  const { error } = await supabase.from('conversations').delete().eq('id', conversationId)
+
+  if (error) throw error
+}

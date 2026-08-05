@@ -1,35 +1,16 @@
-import Link from 'next/link'
-import { createClient } from '@/lib/supabase/server'
-import { listConversations } from '@/lib/db/conversations'
 import NewConversationButton from './new-conversation-button'
 
-export default async function ConversationListPage() {
-  const supabase = await createClient()
-  const conversations = await listConversations(supabase)
-
+// The conversation list itself now lives in the persistent sidebar
+// (sidebar.tsx) — this page is just the "nothing selected yet" landing
+// state, the same role ChatGPT/Gemini's blank composer screen plays.
+export default function HomePage() {
   return (
-    <div className="mx-auto max-w-2xl p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-bold">Your conversations</h1>
-        <NewConversationButton />
-      </div>
-
-      {conversations.length === 0 && (
-        <p className="text-neutral-400">No conversations yet — start one above.</p>
-      )}
-
-      <ul className="space-y-2">
-        {conversations.map((c) => (
-          <li key={c.id}>
-            <Link
-              href={`/c/${c.id}`}
-              className="block rounded-lg bg-neutral-900 p-4 hover:bg-neutral-800"
-            >
-              {c.title}
-            </Link>
-          </li>
-        ))}
-      </ul>
+    <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+      <h1 className="text-2xl font-bold tracking-tight">Sofii</h1>
+      <p className="max-w-sm text-sm text-neutral-400">
+        Pick up a conversation from the sidebar, or start a new one.
+      </p>
+      <NewConversationButton />
     </div>
   )
 }
