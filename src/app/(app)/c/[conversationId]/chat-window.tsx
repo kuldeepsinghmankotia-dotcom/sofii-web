@@ -11,6 +11,89 @@ type Props = {
   initialMessages: ChatMessage[]
 }
 
+// Checked as a plain substring match against the browser's own speech
+// recognition transcript — "Sofii" is an uncommon name that generic speech
+// models often mishear, so a few likely-sounding variants are included
+// rather than requiring an exact match. This is a real accuracy trade-off,
+// not a bug: false negatives (said it, didn't trigger) are more likely than
+// false positives at this stage.
+const WAKE_PHRASES = ['sofii', 'sofi', 'sophie', 'sophia', 'sofia']
+
+function containsWakeWord(transcript: string): boolean {
+  const lower = transcript.toLowerCase()
+  return WAKE_PHRASES.some((phrase) => lower.includes(phrase))
+}
+
+const SPEECH_RMS_THRESHOLD = 0.02
+const SILENCE_TO_STOP_MS = 1200
+const MAX_WAIT_FOR_SPEECH_MS = 6000
+
+/**
+ * Lightweight energy-based voice-activity detection: watches live mic
+ * amplitude and calls back once the user has spoken and then gone quiet for
+ * SILENCE_TO_STOP_MS, or gives up after MAX_WAIT_FOR_SPEECH_MS of hearing
+ * nothing at all. This is what lets hands-free mode work without a Stop
+ * button — manual push-to-talk recording doesn't use this at all, so its
+ * existing explicit-Stop behavior is unchanged.
+ */
+function attachSilenceAutoStop(
+  stream: MediaStream,
+  onSilence: (heardSpeech: boolean) => void
+): () => void {
+  const audioCtx = new AudioContext()
+  const source = audioCtx.createMediaStreamSource(stream)
+  const analyser = audioCtx.createAnalyser()
+  analyser.fftSize = 256
+  source.connect(analyser)
+  const data = new Uint8Array(analyser.frequencyBinCount)
+
+  let hasSpoken = false
+  let silenceStartedAt: number | null = null
+  const startedAt = Date.now()
+  let raf = 0
+  let stopped = false
+
+  const cleanup = (): void => {
+    if (stopped) return
+    stopped = true
+    cancelAnimationFrame(raf)
+    source.disconnect()
+    void audioCtx.close()
+  }
+
+  const tick = (): void => {
+    raf = requestAnimationFrame(tick)
+
+    analyser.getByteTimeDomainData(data)
+    let sumSquares = 0
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i] - 128) / 128
+      sumSquares += v * v
+    }
+    const rms = Math.sqrt(sumSquares / data.length)
+
+    if (rms > SPEECH_RMS_THRESHOLD) {
+      hasSpoken = true
+      silenceStartedAt = null
+      return
+    }
+
+    if (hasSpoken) {
+      if (silenceStartedAt === null) silenceStartedAt = Date.now()
+      else if (Date.now() - silenceStartedAt > SILENCE_TO_STOP_MS) {
+        cleanup()
+        onSilence(true)
+      }
+    } else if (Date.now() - startedAt > MAX_WAIT_FOR_SPEECH_MS) {
+      cleanup()
+      onSilence(false)
+    }
+  }
+
+  tick()
+  return cleanup
+}
+
 export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [input, setInput] = useState('')
@@ -18,6 +101,9 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [speakEnabled, setSpeakEnabled] = useState(false)
+  const [wakeWordEnabled, setWakeWordEnabled] = useState(false)
+  const [isWakeListening, setIsWakeListening] = useState(false)
+  const [isSpeaking, setIsSpeaking] = useState(false)
   const [pendingImage, setPendingImage] = useState<{
     file: File
     previewUrl: string
@@ -28,6 +114,9 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const audioChunksRef = useRef<BlobPart[]>([])
   const imageInputRef = useRef<HTMLInputElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const vadStopRef = useRef<(() => void) | null>(null)
+  const heardSpeechRef = useRef(true)
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
 
   useEffect(() => {
     return () => {
@@ -52,10 +141,23 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     }
   }, [pendingImage])
 
-  const speak = (text: string): void => {
-    if (!speakEnabled || !text.trim()) return
+  const speak = (text: string, onEnd?: () => void): void => {
+    if (!speakEnabled || !text.trim()) {
+      onEnd?.()
+      return
+    }
     window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text))
+    const utterance = new SpeechSynthesisUtterance(text)
+    // isSpeaking gates the wake-word listener below (see that effect) so it
+    // doesn't arm itself while Sofii's own voice is playing through the
+    // speakers — otherwise the mic could pick up her own reply and
+    // misinterpret it as containing the wake word.
+    setIsSpeaking(true)
+    utterance.onend = () => {
+      setIsSpeaking(false)
+      onEnd?.()
+    }
+    window.speechSynthesis.speak(utterance)
   }
 
   const addSystemNote = (content: string): void => {
@@ -191,26 +293,29 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     }
 
     setSending(false)
-    speak(fullContent)
+
+    // In hands-free mode, keep the conversation going after the spoken
+    // reply finishes — a real Jarvis-style back-and-forth instead of
+    // requiring the wake word again for every turn. If the user says
+    // nothing, the VAD's own give-up timeout (see attachSilenceAutoStop)
+    // drops this back to passive wake-word listening on its own.
+    speak(fullContent, () => {
+      if (wakeWordEnabled) void startRecording({ autoStopOnSilence: true })
+    })
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter') sendMessage()
   }
 
-  const toggleRecording = async (): Promise<void> => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop()
-      setIsRecording(false)
-      return
-    }
-
+  const startRecording = async (options?: { autoStopOnSilence?: boolean }): Promise<void> => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream, {
         mimeType: 'audio/webm;codecs=opus'
       })
       audioChunksRef.current = []
+      heardSpeechRef.current = true
       setMicStream(stream)
 
       recorder.ondataavailable = (e): void => {
@@ -218,8 +323,16 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       }
 
       recorder.onstop = async (): Promise<void> => {
+        vadStopRef.current?.()
+        vadStopRef.current = null
         stream.getTracks().forEach((track) => track.stop())
         setMicStream(null)
+
+        // A hands-free session that timed out without anyone saying
+        // anything doesn't need a Whisper call at all — this is known
+        // client-side already, no need to transcribe silence.
+        if (!heardSpeechRef.current) return
+
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
 
         setIsTranscribing(true)
@@ -245,15 +358,149 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       mediaRecorderRef.current = recorder
       recorder.start()
       setIsRecording(true)
+
+      if (options?.autoStopOnSilence) {
+        vadStopRef.current = attachSilenceAutoStop(stream, (heardSpeech) => {
+          heardSpeechRef.current = heardSpeech
+          if (mediaRecorderRef.current?.state === 'recording') {
+            mediaRecorderRef.current.stop()
+          }
+          setIsRecording(false)
+        })
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       addSystemNote(`Microphone unavailable: ${message}`)
     }
   }
 
+  const stopRecording = (): void => {
+    vadStopRef.current?.()
+    vadStopRef.current = null
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop()
+    }
+    setIsRecording(false)
+  }
+
+  const toggleRecording = (): void => {
+    if (isRecording) {
+      stopRecording()
+    } else {
+      void startRecording()
+    }
+  }
+
+  // Continuous "Sofii" wake-word listening. Only armed while nothing else
+  // voice-related is already happening — recording/transcribing/sending all
+  // pause it, and it re-arms itself once they finish. Chrome/Edge only (the
+  // Web Speech API isn't implemented elsewhere); this is the free, no-new-
+  // account path, at the cost of accuracy some dedicated wake-word engines
+  // would do better, and of continuous audio going to the browser's speech
+  // service while armed — a real, deliberate trade-off against this app's
+  // previous push-to-talk-only design, made explicitly at the user's
+  // request.
+  useEffect(() => {
+    if (!wakeWordEnabled || isRecording || isTranscribing || sending || isSpeaking) {
+      recognitionRef.current?.stop()
+      recognitionRef.current = null
+      // Deferred rather than called synchronously in the effect body —
+      // this project's react-hooks/set-state-in-effect rule (React
+      // Compiler) flags that as cascading-render-prone.
+      queueMicrotask(() => setIsWakeListening(false))
+      return
+    }
+
+    const SpeechRecognitionCtor = window.SpeechRecognition ?? window.webkitSpeechRecognition
+    if (!SpeechRecognitionCtor) {
+      queueMicrotask(() => {
+        addSystemNote("Wake-word mode needs Chrome or Edge — this browser doesn't support it.")
+        setWakeWordEnabled(false)
+      })
+      return
+    }
+
+    let stopped = false
+
+    const arm = (): void => {
+      if (stopped) return
+
+      const recognition = new SpeechRecognitionCtor()
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognition.lang = 'en-US'
+      let heard = false
+
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map((r) => r[0].transcript)
+          .join(' ')
+        if (containsWakeWord(transcript)) {
+          heard = true
+          recognition.stop()
+        }
+      }
+
+      recognition.onerror = () => {
+        // 'no-speech'/'aborted'/etc. — onend still fires after, handled there.
+      }
+
+      recognition.onend = () => {
+        if (stopped) return
+        if (heard) {
+          setIsWakeListening(false)
+          void startRecording({ autoStopOnSilence: true })
+        } else {
+          arm()
+        }
+      }
+
+      recognition.start()
+      recognitionRef.current = recognition
+      queueMicrotask(() => setIsWakeListening(true))
+    }
+
+    arm()
+
+    return () => {
+      stopped = true
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null
+        recognitionRef.current.stop()
+      }
+      recognitionRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wakeWordEnabled, isRecording, isTranscribing, sending, isSpeaking])
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="mb-2 flex justify-end">
+      <div className="mb-2 flex items-center justify-end gap-3">
+        {isWakeListening && (
+          <span className="flex items-center gap-1.5 text-xs text-neutral-500">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+            Listening for &ldquo;Sofii&rdquo;…
+          </span>
+        )}
+        <button
+          onClick={() => {
+            setWakeWordEnabled((prev) => {
+              const next = !prev
+              // Hands-free replies need to be audible — enabling Jarvis
+              // mode turns speech on too rather than leaving a silent
+              // hands-free loop that only works if the toggle happened to
+              // already be on.
+              if (next) setSpeakEnabled(true)
+              return next
+            })
+          }}
+          title={wakeWordEnabled ? 'Jarvis mode on — say "Sofii" anytime' : 'Enable Jarvis mode'}
+          className={`rounded-full px-3 py-1 text-xs font-medium ${
+            wakeWordEnabled ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-neutral-300'
+          }`}
+        >
+          🪄 Jarvis
+        </button>
         <button
           onClick={() =>
             setSpeakEnabled((prev) => {
@@ -317,7 +564,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
           <VoiceOrb stream={micStream} size={260} />
           <p className="text-sm text-neutral-400">Listening…</p>
           <button
-            onClick={toggleRecording}
+            onClick={stopRecording}
             title="Stop recording"
             className="rounded-full bg-red-600 px-8 py-3 font-medium"
           >
