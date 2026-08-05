@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { createClient } from '@/lib/supabase/client'
 import { resizeImageToJpeg } from '@/lib/image/resize'
 import VoiceOrb from './voice-orb'
@@ -92,6 +94,26 @@ function attachSilenceAutoStop(
 
   tick()
   return cleanup
+}
+
+// Renders assistant replies as structured markdown (headings, lists, bold,
+// code, tables) instead of one raw text blob — the "ChatGPT/Copilot" look
+// the user asked for. Tight custom element spacing (via the `md` class in
+// globals.css) rather than a full prose plugin, since a chat bubble needs
+// much less vertical margin than an article body.
+function AssistantContent({ content }: { content: string }) {
+  return (
+    <div className="md">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  )
 }
 
 export default function ChatWindow({ conversationId, initialMessages }: Props) {
@@ -566,8 +588,8 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
         {messages.map((m) => (
           <div
             key={m.id}
-            className={`max-w-[75%] rounded-xl p-3 whitespace-pre-wrap ${
-              m.role === 'user' ? 'ml-auto bg-blue-600' : 'bg-neutral-800'
+            className={`max-w-[75%] rounded-xl p-3 ${
+              m.role === 'user' ? 'ml-auto whitespace-pre-wrap bg-blue-600' : 'bg-neutral-800'
             }`}
           >
             {m.image_url && (
@@ -578,7 +600,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
                 className="mb-2 max-h-64 max-w-full rounded-lg object-contain"
               />
             )}
-            {m.content}
+            {m.role === 'user' ? m.content : <AssistantContent content={m.content} />}
           </div>
         ))}
         {isTranscribing && <div className="ml-auto text-sm text-neutral-400">Transcribing…</div>}
