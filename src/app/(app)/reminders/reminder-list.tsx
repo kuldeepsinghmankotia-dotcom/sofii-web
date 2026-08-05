@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
   cancelReminder,
@@ -9,6 +10,7 @@ import {
   type Reminder,
   type ReminderStatus
 } from '@/lib/db/reminders'
+import { Tooltip } from '../tooltip'
 
 function toLocalDatetimeInputValue(date: Date): string {
   const pad = (n: number): string => String(n).padStart(2, '0')
@@ -74,32 +76,33 @@ export default function ReminderList({ initialReminders }: { initialReminders: R
             if (e.key === 'Enter') handleAdd()
           }}
           placeholder="What should I remind you about?"
-          className="min-w-[200px] flex-1 rounded-lg bg-neutral-800 p-3 outline-none"
+          className="min-w-[200px] flex-1 rounded-lg border border-[var(--border)] bg-white/[0.03] p-3 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
         />
         <input
           type="datetime-local"
           value={when}
           onChange={(e) => setWhen(e.target.value)}
-          className="rounded-lg bg-neutral-800 p-3 outline-none"
+          className="rounded-lg border border-[var(--border)] bg-white/[0.03] p-3 text-[var(--text)] outline-none"
         />
         <button
           onClick={handleAdd}
-          className="rounded-lg bg-blue-600 px-5 py-3 font-medium disabled:opacity-60"
+          className="rounded-lg px-5 py-3 font-medium text-black disabled:opacity-60"
+          style={{ background: 'var(--accent-gradient)' }}
         >
           Add
         </button>
       </div>
 
       <div className="space-y-2">
-        {reminders.length === 0 && <p className="text-neutral-400">No reminders yet.</p>}
+        {reminders.length === 0 && <p className="text-[var(--text-muted)]">No reminders yet.</p>}
         {reminders.map((reminder) => (
           <div
             key={reminder.id}
-            className="flex items-center justify-between gap-3 rounded-lg bg-neutral-900 p-3"
+            className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-white/[0.03] p-3"
           >
             <div className="min-w-0">
-              <div className="truncate">{reminder.content}</div>
-              <div className="text-xs text-neutral-400">
+              <div className="truncate text-[var(--text)]">{reminder.content}</div>
+              <div className="text-xs text-[var(--text-muted)]">
                 {new Date(reminder.scheduled_at).toLocaleString()} · {statusLabel(reminder.status)}
               </div>
             </div>
@@ -108,19 +111,20 @@ export default function ReminderList({ initialReminders }: { initialReminders: R
               {reminder.status === 'pending' && (
                 <button
                   onClick={() => handleCancel(reminder.id)}
-                  title="Cancel reminder"
-                  className="rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-300 hover:border-neutral-400"
+                  className="rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text)]"
                 >
                   Cancel
                 </button>
               )}
-              <button
-                onClick={() => handleDelete(reminder.id)}
-                title="Delete reminder"
-                className="text-neutral-400 hover:text-neutral-200"
-              >
-                ✕
-              </button>
+              <Tooltip label="Delete reminder">
+                <button
+                  onClick={() => handleDelete(reminder.id)}
+                  aria-label="Delete reminder"
+                  className="rounded p-1 text-[var(--text-muted)] hover:bg-red-500/10 hover:text-[var(--danger)]"
+                >
+                  <X size={14} />
+                </button>
+              </Tooltip>
             </div>
           </div>
         ))}

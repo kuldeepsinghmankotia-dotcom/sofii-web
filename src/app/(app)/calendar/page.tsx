@@ -1,3 +1,4 @@
+import { Calendar as CalendarIcon, CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getCalendarConnection } from '@/lib/db/calendar'
 import { getValidAccessToken, listUpcomingEvents } from '@/lib/google/calendar'
@@ -31,39 +32,52 @@ export default async function CalendarPage({
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <h1 className="mb-2 text-xl font-bold">📅 Calendar</h1>
-      <p className="mb-6 text-sm text-neutral-400">
+      <h1 className="mb-2 flex items-center gap-2 text-xl font-bold text-[var(--text)]">
+        <CalendarIcon size={20} className="accent-text" />
+        Calendar
+      </h1>
+      <p className="mb-6 text-sm text-[var(--text-muted)]">
         Connect Google Calendar so Sofii can check and create events for you in chat.
       </p>
 
       {connected && (
-        <p className="mb-4 rounded-lg bg-green-900/40 p-3 text-sm text-green-400">
+        <p className="mb-4 rounded-lg bg-emerald-500/10 p-3 text-sm text-emerald-400">
           Google Calendar connected.
         </p>
       )}
       {error && (
-        <p className="mb-4 rounded-lg bg-red-900/40 p-3 text-sm text-red-400">
+        <p className="mb-4 rounded-lg bg-red-500/10 p-3 text-sm text-[var(--danger)]">
           {ERROR_MESSAGES[error] ?? 'Something went wrong.'}
         </p>
       )}
 
       {connection ? (
         <div>
-          <div className="mb-6 flex items-center justify-between rounded-lg bg-neutral-900 p-4">
-            <span className="text-sm text-neutral-300">✓ Connected to Google Calendar</span>
+          <div className="mb-6 flex items-center justify-between rounded-lg border border-[var(--border)] bg-white/[0.03] p-4">
+            <span className="flex items-center gap-1.5 text-sm text-[var(--text)]">
+              <CheckCircle2 size={15} className="text-emerald-400" />
+              Connected to Google Calendar
+            </span>
             <DisconnectButton />
           </div>
 
-          <h2 className="mb-3 text-sm font-medium text-neutral-400">Upcoming events</h2>
-          {eventsError && <p className="text-sm text-red-400">Could not load events: {eventsError}</p>}
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-muted)]">Upcoming events</h2>
+          {eventsError && (
+            <p className="text-sm text-[var(--danger)]">Could not load events: {eventsError}</p>
+          )}
           {!eventsError && events.length === 0 && (
-            <p className="text-neutral-400">No upcoming events.</p>
+            <p className="text-[var(--text-muted)]">No upcoming events.</p>
           )}
           <div className="space-y-2">
             {events.map((event) => (
-              <div key={event.id} className="rounded-lg bg-neutral-900 p-3">
+              <div
+                key={event.id}
+                className="rounded-lg border border-[var(--border)] bg-white/[0.03] p-3"
+              >
                 <div>{event.summary}</div>
-                <div className="text-xs text-neutral-400">{new Date(event.start).toLocaleString()}</div>
+                <div className="text-xs text-[var(--text-muted)]">
+                  {new Date(event.start).toLocaleString()}
+                </div>
               </div>
             ))}
           </div>
@@ -71,7 +85,8 @@ export default async function CalendarPage({
       ) : (
         <a
           href="/api/auth/google/connect"
-          className="inline-block rounded-lg bg-blue-600 px-5 py-3 font-medium"
+          className="inline-block rounded-lg px-5 py-3 font-medium text-black"
+          style={{ background: 'var(--accent-gradient)' }}
         >
           Connect Google Calendar
         </a>

@@ -1,22 +1,30 @@
 'use client'
 
-import {
-  isValidElement,
-  useEffect,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type KeyboardEvent,
-  type ReactNode
-} from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { toast } from 'sonner'
+import {
+  ImagePlus,
+  Mic,
+  Pencil,
+  RotateCcw,
+  Send,
+  Sparkles,
+  Square,
+  Volume2,
+  VolumeX,
+  Wand2,
+  X,
+  Zap
+} from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { resizeImageToJpeg } from '@/lib/image/resize'
 import VoiceOrb from './voice-orb'
+import { CopyButton, AssistantContent } from './message-content'
 import { notifyConversationsChanged } from '../../sidebar'
+import { Tooltip } from '../../tooltip'
+import { ModelPicker, useSelectedModel, MODEL_INFO, type ModelChoice } from '../../model-picker'
 import type { ChatMessage } from '@/lib/db/messages'
 
 type Props = {
@@ -107,91 +115,6 @@ function attachSilenceAutoStop(
   return cleanup
 }
 
-function CopyButton({ content, label }: { content: string; label?: string }) {
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(content)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Clipboard access can be denied/unavailable in some browser contexts
-      // — not worth surfacing an error for a copy button.
-    }
-  }
-
-  return (
-    <button
-      onClick={handleCopy}
-      title="Copy"
-      className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
-    >
-      {copied ? '✓ Copied' : `⧉ ${label ?? 'Copy'}`}
-    </button>
-  )
-}
-
-// rehype-highlight (wired in below) tags fenced code blocks' inner <code>
-// with a `language-xxx` class; this wraps that in a small header (language
-// label + a copy button reading the rendered <pre>'s own text, so it always
-// copies exactly what's on screen) instead of a bare unlabeled block —
-// matching the Copilot/ChatGPT code-block treatment.
-function CodeBlock({ children }: { children?: ReactNode }) {
-  const preRef = useRef<HTMLPreElement>(null)
-  const [copied, setCopied] = useState(false)
-
-  const codeElement = Array.isArray(children) ? children[0] : children
-  const language = isValidElement<{ className?: string }>(codeElement)
-    ? (codeElement.props.className ?? '').match(/language-(\w+)/)?.[1]
-    : undefined
-
-  const handleCopy = async (): Promise<void> => {
-    const text = preRef.current?.textContent ?? ''
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Clipboard access can be denied/unavailable — not worth an error UI.
-    }
-  }
-
-  return (
-    <div className="code-block">
-      <div className="code-block-header">
-        <span>{language ?? 'code'}</span>
-        <button onClick={handleCopy} className="code-block-copy">
-          {copied ? '✓ Copied' : '⧉ Copy'}
-        </button>
-      </div>
-      <pre ref={preRef}>{children}</pre>
-    </div>
-  )
-}
-
-// Renders assistant replies as structured markdown (headings, lists, bold,
-// code, tables) instead of one raw text blob — the "ChatGPT/Copilot" look
-// the user asked for. Tight custom element spacing (via the `md` class in
-// globals.css) rather than a full prose plugin, since a chat bubble needs
-// much less vertical margin than an article body.
-function AssistantContent({ content }: { content: string }) {
-  return (
-    <div className="md">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
-        components={{
-          a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-          pre: (props) => <CodeBlock>{props.children}</CodeBlock>
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
-  )
-}
-
 export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [input, setInput] = useState('')
@@ -223,6 +146,14 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const [micStream, setMicStream] = useState<MediaStream | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [model, setModel] = useSelectedModel()
+  // Which model actually answered each assistant message — read off the
+  // response's X-Model header, not persisted server-side (see
+  // model-picker.tsx), so this resets on reload; that's an acceptable
+  // trade-off for keeping model choice a lightweight per-browser toggle
+  // rather than a schema change.
+  const [messageModels, setMessageModels] = useState<Record<string, ModelChoice>>({})
+  const reducedMotion = useReducedMotion()
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<BlobPart[]>([])
   const imageInputRef = useRef<HTMLInputElement>(null)
@@ -290,19 +221,6 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     window.speechSynthesis.speak(utterance)
   }
 
-  const addSystemNote = (content: string): void => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content,
-        created_at: new Date().toISOString(),
-        image_url: null
-      }
-    ])
-  }
-
   const handleImageSelect = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0]
     e.target.value = ''
@@ -321,7 +239,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      addSystemNote(message)
+      toast.error(message)
     } finally {
       setUploadingImage(false)
     }
@@ -349,11 +267,16 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId, ...payload }),
+        body: JSON.stringify({ conversationId, model, ...payload }),
         signal: controller.signal
       })
 
       if (!response.ok || !response.body) return { content: '', ok: false }
+
+      const answeredBy = response.headers.get('X-Model')
+      if (answeredBy === 'groq' || answeredBy === 'gemini') {
+        setMessageModels((prev) => ({ ...prev, [assistantId]: answeredBy }))
+      }
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
@@ -485,7 +408,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        addSystemNote(`Image upload failed: ${message}`)
+        toast.error(`Image upload failed: ${message}`)
         setSending(false)
         setUploadingImage(false)
         return
@@ -641,7 +564,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
-          addSystemNote(`Transcription failed: ${message}`)
+          toast.error(`Transcription failed: ${message}`)
           setVoiceTurnActive(false)
         } finally {
           setIsTranscribing(false)
@@ -663,7 +586,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      addSystemNote(`Microphone unavailable: ${message}`)
+      toast.error(`Microphone unavailable: ${message}`)
       setVoiceTurnActive(false)
     }
   }
@@ -725,7 +648,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     const SpeechRecognitionCtor = window.SpeechRecognition ?? window.webkitSpeechRecognition
     if (!SpeechRecognitionCtor) {
       queueMicrotask(() => {
-        addSystemNote("Wake-word mode needs Chrome or Edge — this browser doesn't support it.")
+        toast.error("Wake-word mode needs Chrome or Edge — this browser doesn't support it.")
         setWakeWordEnabled(false)
       })
       return
@@ -798,53 +721,67 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
             Listening for &ldquo;Sofii&rdquo;…
           </span>
         )}
-        <button
-          onClick={() => {
-            setWakeWordEnabled((prev) => {
-              const next = !prev
-              // Hands-free replies need to be audible — enabling Jarvis
-              // mode turns speech on too rather than leaving a silent
-              // hands-free loop that only works if the toggle happened to
-              // already be on.
-              if (next) setSpeakEnabled(true)
-              return next
-            })
-          }}
-          title={wakeWordEnabled ? 'Jarvis mode on — say "Sofii" anytime' : 'Enable Jarvis mode'}
-          className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-            wakeWordEnabled
-              ? 'text-black'
-              : 'border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]'
-          }`}
-          style={wakeWordEnabled ? { background: 'var(--accent-gradient)' } : undefined}
-        >
-          🪄 Jarvis
-        </button>
-        <button
-          onClick={() =>
-            setSpeakEnabled((prev) => {
-              if (prev) window.speechSynthesis.cancel()
-              return !prev
-            })
-          }
-          title={speakEnabled ? 'Spoken replies on' : 'Spoken replies off'}
-          className="text-lg"
-        >
-          {speakEnabled ? '🔊' : '🔇'}
-        </button>
+        <ModelPicker model={model} onChange={setModel} />
+        <Tooltip label={wakeWordEnabled ? 'Jarvis mode on — say "Sofii" anytime' : 'Enable Jarvis mode'}>
+          <button
+            onClick={() => {
+              setWakeWordEnabled((prev) => {
+                const next = !prev
+                // Hands-free replies need to be audible — enabling Jarvis
+                // mode turns speech on too rather than leaving a silent
+                // hands-free loop that only works if the toggle happened to
+                // already be on.
+                if (next) setSpeakEnabled(true)
+                return next
+              })
+            }}
+            aria-label="Toggle Jarvis hands-free mode"
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
+              wakeWordEnabled
+                ? 'text-black'
+                : 'border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]'
+            }`}
+            style={wakeWordEnabled ? { background: 'var(--accent-gradient)' } : undefined}
+          >
+            <Wand2 size={13} />
+            Jarvis
+          </button>
+        </Tooltip>
+        <Tooltip label={speakEnabled ? 'Spoken replies on' : 'Spoken replies off'}>
+          <button
+            onClick={() =>
+              setSpeakEnabled((prev) => {
+                if (prev) window.speechSynthesis.cancel()
+                return !prev
+              })
+            }
+            aria-label={speakEnabled ? 'Turn off spoken replies' : 'Turn on spoken replies'}
+            className="rounded-lg p-1 text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text)]"
+          >
+            {speakEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}
+          </button>
+        </Tooltip>
       </div>
 
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-1 py-2">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
-          {messages.map((m, i) => {
-            const isLastAssistantReply =
-              m.role === 'assistant' && i === messages.length - 1 && !!m.content && !sending
-            return (
-              <div
-                key={m.id}
-                className={`message-enter group ${m.role === 'user' ? 'flex justify-end' : ''}`}
-              >
-                {m.role === 'user' ? (
+          <AnimatePresence initial={false}>
+            {messages.map((m, i) => {
+              const isLastAssistantReply =
+                m.role === 'assistant' && i === messages.length - 1 && !!m.content && !sending
+              const isStreamingPlaceholder =
+                m.role === 'assistant' && i === messages.length - 1 && !m.content && sending
+              const answeredBy = messageModels[m.id]
+              return (
+                <motion.div
+                  key={m.id}
+                  layout={!reducedMotion}
+                  initial={reducedMotion ? false : { opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                  className={`group ${m.role === 'user' ? 'flex justify-end' : ''}`}
+                >
+                  {m.role === 'user' ? (
                   <div className="max-w-[75%]">
                     {m.image_url && (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -897,13 +834,16 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
                         </div>
                         <div className="mt-1 flex justify-end gap-1 opacity-0 transition group-hover:opacity-100">
                           <CopyButton content={m.content} />
-                          <button
-                            onClick={() => startEdit(m)}
-                            title="Edit"
-                            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
-                          >
-                            ✎ Edit
-                          </button>
+                          <Tooltip label="Edit">
+                            <button
+                              onClick={() => startEdit(m)}
+                              aria-label="Edit message"
+                              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+                            >
+                              <Pencil size={13} />
+                              Edit
+                            </button>
+                          </Tooltip>
                         </div>
                       </>
                     )}
@@ -927,49 +867,76 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
                           className="mb-2 max-h-64 max-w-full rounded-lg object-contain"
                         />
                       )}
-                      <AssistantContent content={m.content} />
-                      <div className="mt-1 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                      {isStreamingPlaceholder ? (
+                        <div className="typing-dots" aria-label="Sofii is thinking">
+                          <span />
+                          <span />
+                          <span />
+                        </div>
+                      ) : (
+                        <AssistantContent content={m.content} />
+                      )}
+                      <div className="mt-1 flex items-center gap-2 opacity-0 transition group-hover:opacity-100">
                         <CopyButton content={m.content} />
                         {isLastAssistantReply && (
-                          <button
-                            onClick={() => void regenerate(m.id)}
-                            title="Regenerate"
-                            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
-                          >
-                            ↻ Regenerate
-                          </button>
+                          <Tooltip label="Regenerate">
+                            <button
+                              onClick={() => void regenerate(m.id)}
+                              aria-label="Regenerate response"
+                              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+                            >
+                              <RotateCcw size={13} />
+                              Regenerate
+                            </button>
+                          </Tooltip>
+                        )}
+                        {answeredBy && !isStreamingPlaceholder && (
+                          <span className="model-badge">
+                            {answeredBy === 'groq' ? <Zap size={11} /> : <Sparkles size={11} />}
+                            {MODEL_INFO[answeredBy].label}
+                          </span>
                         )}
                       </div>
                     </div>
                   </div>
                 )}
-              </div>
-            )
-          })}
+                </motion.div>
+              )
+            })}
+          </AnimatePresence>
           {isTranscribing && <div className="text-sm text-[var(--text-muted)]">Transcribing…</div>}
         </div>
       </div>
 
-      {pendingImage && (
-        <div className="mx-auto mt-3 flex w-full max-w-3xl items-center gap-2 rounded-lg border border-[var(--border)] bg-white/[0.03] p-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={pendingImage.previewUrl}
-            alt="To send"
-            className="h-12 w-12 rounded object-cover"
-          />
-          <span className="flex-1 truncate text-sm text-[var(--text-muted)]">
-            {pendingImage.file.name}
-          </span>
-          <button
-            onClick={clearPendingImage}
-            title="Remove image"
-            className="text-[var(--text-muted)] hover:text-[var(--text)]"
+      <AnimatePresence>
+        {pendingImage && (
+          <motion.div
+            initial={reducedMotion ? false : { opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mx-auto mt-3 flex w-full max-w-3xl items-center gap-2 overflow-hidden rounded-lg border border-[var(--border)] bg-white/[0.03] p-2"
           >
-            ✕
-          </button>
-        </div>
-      )}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={pendingImage.previewUrl}
+              alt="To send"
+              className="h-12 w-12 rounded object-cover"
+            />
+            <span className="flex-1 truncate text-sm text-[var(--text-muted)]">
+              {pendingImage.file.name}
+            </span>
+            <Tooltip label="Remove image">
+              <button
+                onClick={clearPendingImage}
+                aria-label="Remove attached image"
+                className="rounded p-1 text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+              >
+                <X size={15} />
+              </button>
+            </Tooltip>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {isRecording && micStream ? (
         // Fixed, viewport-centered overlay (not just centered within the
@@ -980,30 +947,34 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
           <p className="text-sm text-[var(--text-muted)]">Listening…</p>
           <button
             onClick={stopRecording}
-            title="Stop recording"
-            className="rounded-full bg-red-600 px-8 py-3 font-medium text-white"
+            className="flex items-center gap-2 rounded-full bg-red-600 px-8 py-3 font-medium text-white"
           >
+            <Square size={15} fill="currentColor" />
             Stop
           </button>
         </div>
       ) : (
         <div className="accent-ring mx-auto mt-4 flex w-full max-w-3xl items-end gap-2 rounded-2xl border border-[var(--border)] bg-white/[0.03] p-2">
-          <button
-            onClick={toggleRecording}
-            disabled={isTranscribing}
-            title="Start recording"
-            className="rounded-xl px-3 py-2.5 text-lg hover:bg-white/5 disabled:opacity-60"
-          >
-            🎙️
-          </button>
-          <button
-            onClick={() => imageInputRef.current?.click()}
-            disabled={uploadingImage}
-            title="Attach an image"
-            className="rounded-xl px-3 py-2.5 text-lg hover:bg-white/5 disabled:opacity-60"
-          >
-            🖼️
-          </button>
+          <Tooltip label="Start recording">
+            <button
+              onClick={toggleRecording}
+              disabled={isTranscribing}
+              aria-label="Start voice recording"
+              className="rounded-xl px-3 py-2.5 hover:bg-white/5 disabled:opacity-60"
+            >
+              <Mic size={18} />
+            </button>
+          </Tooltip>
+          <Tooltip label="Attach an image">
+            <button
+              onClick={() => imageInputRef.current?.click()}
+              disabled={uploadingImage}
+              aria-label="Attach an image"
+              className="rounded-xl px-3 py-2.5 hover:bg-white/5 disabled:opacity-60"
+            >
+              <ImagePlus size={18} />
+            </button>
+          </Tooltip>
           <input
             ref={imageInputRef}
             type="file"
@@ -1023,12 +994,25 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
           <button
             onClick={sending ? handleStop : () => sendMessage()}
             disabled={uploadingImage}
-            className={`rounded-xl px-5 py-2.5 text-sm font-medium text-black transition disabled:opacity-60 ${
+            aria-label={sending ? 'Stop generating' : 'Send message'}
+            className={`flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-medium text-black transition disabled:opacity-60 ${
               sending ? 'bg-red-500 text-white' : ''
             }`}
             style={sending ? undefined : { background: 'var(--accent-gradient)' }}
           >
-            {uploadingImage ? 'Uploading…' : sending ? 'Stop' : 'Send'}
+            {uploadingImage ? (
+              'Uploading…'
+            ) : sending ? (
+              <>
+                <Square size={14} fill="currentColor" />
+                Stop
+              </>
+            ) : (
+              <>
+                <Send size={14} />
+                Send
+              </>
+            )}
           </button>
         </div>
       )}

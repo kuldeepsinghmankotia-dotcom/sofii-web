@@ -3,9 +3,25 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as Dialog from '@radix-ui/react-dialog'
+import {
+  Bell,
+  Calendar,
+  FileText,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  X
+} from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { ConversationSummary } from '@/lib/db/conversations'
 import SignOutButton from './sign-out-button'
+import { Tooltip } from './tooltip'
 
 // Any mutation anywhere in the app (new chat, rename, delete, or the
 // server-side auto-title after a conversation's first exchange) dispatches
@@ -20,10 +36,10 @@ export function notifyConversationsChanged(): void {
 }
 
 const SECONDARY_LINKS = [
-  { href: '/memories', label: 'Memories', icon: '🧠' },
-  { href: '/reminders', label: 'Reminders', icon: '⏰' },
-  { href: '/documents', label: 'Documents', icon: '📄' },
-  { href: '/calendar', label: 'Calendar', icon: '📅' }
+  { href: '/memories', label: 'Memories', icon: Sparkles },
+  { href: '/reminders', label: 'Reminders', icon: Bell },
+  { href: '/documents', label: 'Documents', icon: FileText },
+  { href: '/calendar', label: 'Calendar', icon: Calendar }
 ]
 
 type Group = { label: string; items: ConversationSummary[] }
@@ -157,13 +173,19 @@ export default function Sidebar({
 
   return (
     <>
-      {open && (
-        <div
-          className="fixed inset-0 z-40 bg-black/60 md:hidden"
-          onClick={onClose}
-          aria-hidden="true"
-        />
-      )}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="fixed inset-0 z-40 bg-black/60 md:hidden"
+            onClick={onClose}
+            aria-hidden="true"
+          />
+        )}
+      </AnimatePresence>
 
       <aside
         className={`glass fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col border-r border-[var(--border)] transition-transform duration-200 ease-out md:static md:z-auto md:translate-x-0 ${
@@ -178,13 +200,15 @@ export default function Sidebar({
           >
             SOFII
           </Link>
-          <button
-            onClick={onClose}
-            aria-label="Close sidebar"
-            className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text)] md:hidden"
-          >
-            ✕
-          </button>
+          <Tooltip label="Close sidebar">
+            <button
+              onClick={onClose}
+              aria-label="Close sidebar"
+              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text)] md:hidden"
+            >
+              <X size={16} />
+            </button>
+          </Tooltip>
         </div>
 
         <div className="shrink-0 px-3 pb-3">
@@ -193,19 +217,21 @@ export default function Sidebar({
             disabled={creating}
             className="relative flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-strong)] px-3 py-2.5 text-sm font-medium text-[var(--text)] transition hover:border-[var(--accent-a)] hover:shadow-[0_0_20px_rgba(34,211,238,0.15)] disabled:opacity-60"
           >
-            <span aria-hidden="true" className="accent-text text-base leading-none">
-              +
-            </span>
+            <Plus size={16} className="accent-text" aria-hidden="true" />
             {creating ? 'Creating…' : 'New chat'}
           </button>
         </div>
 
         <div className="accent-ring relative shrink-0 rounded-xl px-3 pb-3">
+          <Search
+            size={14}
+            className="pointer-events-none absolute top-1/2 left-6 -translate-y-1/2 text-[var(--text-muted)]"
+          />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search chats"
-            className="w-full rounded-lg border border-[var(--border)] bg-black/20 px-3 py-1.5 pr-12 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+            className="w-full rounded-lg border border-[var(--border)] bg-black/20 py-1.5 pr-12 pl-8 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
           />
           <kbd className="pointer-events-none absolute top-1/2 right-5 -translate-y-1/2 rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]">
             ⌘K
@@ -235,24 +261,6 @@ export default function Sidebar({
                         onBlur={() => void commitRename(c.id)}
                         className="w-full rounded-lg border border-[var(--border-strong)] bg-black/30 px-2 py-1.5 text-sm text-[var(--text)] outline-none"
                       />
-                    ) : confirmDeleteId === c.id ? (
-                      <div className="flex items-center justify-between gap-1 rounded-lg bg-white/5 px-2 py-1.5 text-sm">
-                        <span className="truncate text-[var(--text-muted)]">Delete this chat?</span>
-                        <div className="flex shrink-0 gap-1">
-                          <button
-                            onClick={() => void handleDelete(c.id)}
-                            className="rounded px-1.5 py-0.5 text-[var(--danger)] hover:bg-red-500/10"
-                          >
-                            Yes
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeleteId(null)}
-                            className="rounded px-1.5 py-0.5 text-[var(--text-muted)] hover:bg-white/10"
-                          >
-                            No
-                          </button>
-                        </div>
-                      </div>
                     ) : (
                       <div
                         className={`group relative flex items-center gap-1 rounded-lg py-1.5 pr-1 pl-3 text-sm ${
@@ -273,20 +281,38 @@ export default function Sidebar({
                         >
                           {c.title}
                         </Link>
-                        <button
-                          onClick={() => startRename(c)}
-                          title="Rename"
-                          className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 hover:bg-white/10 hover:text-[var(--text)] group-hover:opacity-100"
-                        >
-                          ✎
-                        </button>
-                        <button
-                          onClick={() => setConfirmDeleteId(c.id)}
-                          title="Delete"
-                          className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 hover:bg-red-500/10 hover:text-[var(--danger)] group-hover:opacity-100"
-                        >
-                          🗑
-                        </button>
+                        <DropdownMenu.Root>
+                          <DropdownMenu.Trigger asChild>
+                            <button
+                              aria-label={`More actions for ${c.title}`}
+                              className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 hover:bg-white/10 hover:text-[var(--text)] group-hover:opacity-100 data-[state=open]:opacity-100"
+                            >
+                              <MoreHorizontal size={15} />
+                            </button>
+                          </DropdownMenu.Trigger>
+                          <DropdownMenu.Portal>
+                            <DropdownMenu.Content
+                              align="start"
+                              sideOffset={4}
+                              className="radix-pop glass z-[70] min-w-36 rounded-lg border border-[var(--border-strong)] p-1 shadow-[var(--shadow-md)]"
+                            >
+                              <DropdownMenu.Item
+                                onSelect={() => startRename(c)}
+                                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-white/[0.06] data-[highlighted]:text-[var(--text)]"
+                              >
+                                <Pencil size={14} />
+                                Rename
+                              </DropdownMenu.Item>
+                              <DropdownMenu.Item
+                                onSelect={() => setConfirmDeleteId(c.id)}
+                                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--danger)] outline-none data-[highlighted]:bg-red-500/10"
+                              >
+                                <Trash2 size={14} />
+                                Delete
+                              </DropdownMenu.Item>
+                            </DropdownMenu.Content>
+                          </DropdownMenu.Portal>
+                        </DropdownMenu.Root>
                       </div>
                     )}
                   </li>
@@ -308,7 +334,7 @@ export default function Sidebar({
                   : 'text-[var(--text-muted)] hover:bg-white/[0.04] hover:text-[var(--text)]'
               }`}
             >
-              <span aria-hidden="true">{link.icon}</span>
+              <link.icon size={15} aria-hidden="true" />
               {link.label}
             </Link>
           ))}
@@ -321,6 +347,38 @@ export default function Sidebar({
           </span>
         </div>
       </aside>
+
+      <Dialog.Root
+        open={confirmDeleteId !== null}
+        onOpenChange={(next) => {
+          if (!next) setConfirmDeleteId(null)
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="radix-overlay fixed inset-0 z-[70] bg-black/70" />
+          <Dialog.Content className="radix-pop glass fixed top-1/2 left-1/2 z-[70] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[var(--border-strong)] p-5 shadow-[var(--shadow-md)]">
+            <Dialog.Title className="text-sm font-medium text-[var(--text)]">
+              Delete this chat?
+            </Dialog.Title>
+            <Dialog.Description className="mt-1 text-sm text-[var(--text-muted)]">
+              This can&apos;t be undone.
+            </Dialog.Description>
+            <div className="mt-4 flex justify-end gap-2 text-sm">
+              <Dialog.Close asChild>
+                <button className="rounded-lg px-3 py-1.5 text-[var(--text-muted)] hover:bg-white/10">
+                  Cancel
+                </button>
+              </Dialog.Close>
+              <button
+                onClick={() => confirmDeleteId && void handleDelete(confirmDeleteId)}
+                className="rounded-lg bg-red-500/15 px-3 py-1.5 font-medium text-[var(--danger)] hover:bg-red-500/25"
+              >
+                Delete
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </>
   )
 }

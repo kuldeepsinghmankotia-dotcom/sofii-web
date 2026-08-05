@@ -21,6 +21,13 @@ import { listMemories, recordMemoryUsage } from '@/lib/db/memories'
 import { rankMemoriesByRelevance } from '@/lib/memory/ranking'
 import { hasAnyDocuments, matchDocumentChunks } from '@/lib/db/documents'
 import { embedText } from '@/lib/gemini/embeddings'
+import {
+  fetchImageAsInlineData,
+  GEMINI_TEXT_MAX_TOKENS,
+  GEMINI_VISION_MAX_TOKENS,
+  streamGeminiRound,
+  type GeminiContent
+} from '@/lib/gemini/chat'
 import { TOOL_DEFINITIONS } from '@/lib/tools/definitions'
 import { executeToolCall } from '@/lib/tools/execute'
 import {
@@ -34,6 +41,7 @@ import {
 import type { GroqReasoningParams, GroqVisionReasoningParams } from '@/lib/groq/client'
 
 type Client = SupabaseClient<Database>
+type ModelChoice = 'groq' | 'gemini'
 const MEMORY_RECALL_LIMIT = 5
 const DOCUMENT_RECALL_LIMIT = 5
 
@@ -140,12 +148,44 @@ async function autoTitleConversation(
   }
 }
 
+// Converts stored chat history into Gemini's `contents` shape. Only the
+// current turn's image (isCurrentTurn) is attached as inlineData — same
+// scoping rule as toContentParam()'s includeImage, and for the same reason:
+// resending a full image's bytes on every later turn burns real vision
+// tokens for context the assistant's own prior reply already captured in
+// text.
+async function toGeminiContents(
+  messages: { role: string; content: string; image_url: string | null }[]
+): Promise<GeminiContent[]> {
+  const contents: GeminiContent[] = []
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
+    const parts: GeminiContent['parts'] = [{ text: m.content }]
+    if (m.image_url && i === messages.length - 1) {
+      try {
+        parts.push({ inlineData: await fetchImageAsInlineData(m.image_url) })
+      } catch (error) {
+        console.error('Gemini image fetch error:', error)
+      }
+    }
+    contents.push({ role: m.role === 'assistant' ? 'model' : 'user', parts })
+  }
+  return contents
+}
+
 export async function POST(request: NextRequest): Promise<Response> {
-  const { conversationId, content, imageUrl, regenerate } = (await request.json()) as {
+  const {
+    conversationId,
+    content,
+    imageUrl,
+    regenerate,
+    model: modelChoice
+  } = (await request.json()) as {
     conversationId?: string
     content?: string
     imageUrl?: string
     regenerate?: boolean
+    model?: ModelChoice
   }
 
   if (!conversationId || (!regenerate && !content?.trim())) {
@@ -268,6 +308,10 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
   const conversationMessages = regenerate ? history : [...history, currentMessage]
   const usesVision = !!effectiveImageUrl
+  // Gemini is natively multimodal (no separate vision model needed like
+  // Groq's VISION_MODEL fallback), so only Groq's branch needs usesVision to
+  // pick a different model — Gemini's branch just needs it for max tokens.
+  const selectedModel: ModelChoice = modelChoice === 'gemini' ? 'gemini' : 'groq'
 
   // 1536 is real headroom now that SUPPRESS_VISION_REASONING includes
   // reasoning_effort: 'none' — reasoning is disabled outright rather than
@@ -276,7 +320,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Bumping max_tokens alone was tried first and failed: with reasoning
   // merely hidden (not disabled), a 3072-token budget was still exhausted
   // entirely by reasoning on a real photo, twice, at different sizes.
-  const model = usesVision
+  const groqModel = usesVision
     ? { name: VISION_MODEL, maxTokens: 1536, reasoning: SUPPRESS_VISION_REASONING }
     : { name: getGroqModel(), maxTokens: 1024, reasoning: SUPPRESS_REASONING }
 
@@ -302,47 +346,89 @@ export async function POST(request: NextRequest): Promise<Response> {
       }
 
       try {
-        const toolCalls = await streamOneRound(
-          baseMessages,
-          { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
-          model,
-          emit
-        )
+        if (selectedModel === 'gemini') {
+          const geminiContents = await toGeminiContents(conversationMessages)
+          const maxTokens = usesVision ? GEMINI_VISION_MAX_TOKENS : GEMINI_TEXT_MAX_TOKENS
 
-        if (toolCalls.length > 0) {
-          // Independent tool calls run concurrently rather than one at a time.
-          const toolResultMessages: ChatCompletionMessageParam[] = await Promise.all(
-            toolCalls.map(async (toolCall) => ({
-              role: 'tool' as const,
-              tool_call_id: toolCall.id,
-              content: await executeToolCall(
-                { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
-                supabase,
-                user.id
-              )
-            }))
+          const { toolCalls, modelParts } = await streamGeminiRound(
+            geminiContents,
+            systemPrompt,
+            TOOL_DEFINITIONS,
+            maxTokens,
+            emit
           )
 
-          const followUpMessages: ChatCompletionMessageParam[] = [
-            ...baseMessages,
-            {
-              role: 'assistant',
-              content: fullContent || null,
-              tool_calls: toolCalls.map((toolCall) => ({
-                id: toolCall.id,
-                type: 'function',
-                function: { name: toolCall.name, arguments: toolCall.argumentsJson }
+          if (toolCalls.length > 0) {
+            const responseParts = await Promise.all(
+              toolCalls.map(async (toolCall) => ({
+                functionResponse: {
+                  name: toolCall.name,
+                  id: toolCall.id,
+                  response: {
+                    result: await executeToolCall(
+                      { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
+                      supabase,
+                      user.id
+                    )
+                  }
+                }
               }))
-            },
-            ...toolResultMessages
-          ]
+            )
 
-          // Bounded to exactly one tool round: no `tools` option here, so
-          // the model has nothing left to call and must produce a reply.
-          await streamOneRound(followUpMessages, {}, model, emit)
+            const followUpContents: GeminiContent[] = [
+              ...geminiContents,
+              { role: 'model', parts: modelParts },
+              { role: 'user', parts: responseParts }
+            ]
+
+            // Bounded to exactly one tool round: no tools passed here, so
+            // the model has nothing left to call and must produce a reply
+            // — same shape as the Groq follow-up round below.
+            await streamGeminiRound(followUpContents, systemPrompt, undefined, maxTokens, emit)
+          }
+        } else {
+          const toolCalls = await streamOneRound(
+            baseMessages,
+            { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
+            groqModel,
+            emit
+          )
+
+          if (toolCalls.length > 0) {
+            // Independent tool calls run concurrently rather than one at a time.
+            const toolResultMessages: ChatCompletionMessageParam[] = await Promise.all(
+              toolCalls.map(async (toolCall) => ({
+                role: 'tool' as const,
+                tool_call_id: toolCall.id,
+                content: await executeToolCall(
+                  { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
+                  supabase,
+                  user.id
+                )
+              }))
+            )
+
+            const followUpMessages: ChatCompletionMessageParam[] = [
+              ...baseMessages,
+              {
+                role: 'assistant',
+                content: fullContent || null,
+                tool_calls: toolCalls.map((toolCall) => ({
+                  id: toolCall.id,
+                  type: 'function',
+                  function: { name: toolCall.name, arguments: toolCall.argumentsJson }
+                }))
+              },
+              ...toolResultMessages
+            ]
+
+            // Bounded to exactly one tool round: no `tools` option here, so
+            // the model has nothing left to call and must produce a reply.
+            await streamOneRound(followUpMessages, {}, groqModel, emit)
+          }
         }
       } catch (error) {
-        console.error('Groq stream error:', error)
+        console.error(`${selectedModel} stream error:`, error)
         if (!fullContent) controller.enqueue(encoder.encode('Something went wrong.'))
       } finally {
         controller.close()
@@ -365,6 +451,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   })
 
   return new Response(stream, {
-    headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+    headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Model': selectedModel }
   })
 }

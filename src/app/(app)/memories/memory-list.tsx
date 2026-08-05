@@ -1,8 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import { X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { createMemory, deleteMemory, updateMemory, type Memory } from '@/lib/db/memories'
+import { Tooltip } from '../tooltip'
 
 const STALE_UNUSED_DAYS = 14
 const STALE_SINCE_LAST_USE_DAYS = 30
@@ -87,20 +89,26 @@ export default function MemoryList({ initialMemories }: { initialMemories: Memor
             if (e.key === 'Enter') handleAdd()
           }}
           placeholder='Something to remember, e.g. "I prefer TypeScript over JavaScript"'
-          className="flex-1 rounded-lg bg-neutral-800 p-3 outline-none"
+          className="flex-1 rounded-lg border border-[var(--border)] bg-white/[0.03] p-3 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
         />
         <button
           onClick={handleAdd}
-          className="rounded-lg bg-blue-600 px-5 py-3 font-medium disabled:opacity-60"
+          className="rounded-lg px-5 py-3 font-medium text-black disabled:opacity-60"
+          style={{ background: 'var(--accent-gradient)' }}
         >
           Add
         </button>
       </div>
 
       <div className="space-y-2">
-        {memories.length === 0 && <p className="text-neutral-400">Nothing remembered yet.</p>}
+        {memories.length === 0 && (
+          <p className="text-[var(--text-muted)]">Nothing remembered yet.</p>
+        )}
         {memories.map((memory) => (
-          <div key={memory.id} className="rounded-lg bg-neutral-900 p-3">
+          <div
+            key={memory.id}
+            className="rounded-lg border border-[var(--border)] bg-white/[0.03] p-3"
+          >
             <div className="flex items-center justify-between gap-3">
               {editingId === memory.id ? (
                 <input
@@ -112,30 +120,32 @@ export default function MemoryList({ initialMemories }: { initialMemories: Memor
                     if (e.key === 'Enter') commitEditing()
                     if (e.key === 'Escape') setEditingId(null)
                   }}
-                  className="flex-1 rounded border border-blue-600 bg-black px-2 py-1 outline-none"
+                  className="flex-1 rounded border border-[var(--border-strong)] bg-black/30 px-2 py-1 text-[var(--text)] outline-none"
                 />
               ) : (
                 <span
                   onDoubleClick={() => startEditing(memory)}
                   title="Double-click to edit"
-                  className="flex-1 whitespace-pre-wrap"
+                  className="flex-1 whitespace-pre-wrap text-[var(--text)]"
                 >
                   {memory.content}
                 </span>
               )}
-              <button
-                onClick={() => handleDelete(memory.id)}
-                title="Delete memory"
-                className="shrink-0 text-neutral-400 hover:text-neutral-200"
-              >
-                ✕
-              </button>
+              <Tooltip label="Delete memory">
+                <button
+                  onClick={() => handleDelete(memory.id)}
+                  aria-label="Delete memory"
+                  className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-red-500/10 hover:text-[var(--danger)]"
+                >
+                  <X size={14} />
+                </button>
+              </Tooltip>
             </div>
-            <div className="mt-1 flex items-center gap-2 text-xs text-neutral-500">
+            <div className="mt-1 flex items-center gap-2 text-xs text-[var(--text-muted)]">
               <span>{usageLabel(memory)}</span>
               {isStale(memory) && (
                 <span
-                  className="rounded bg-amber-900/40 px-1.5 py-0.5 text-amber-400"
+                  className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-400"
                   title="Hasn't been relevant to a recent conversation — consider deleting it if it's no longer useful"
                 >
                   not used recently

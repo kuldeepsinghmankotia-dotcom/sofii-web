@@ -1,8 +1,10 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import { Upload, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { deleteDocument, type DocumentSummary } from '@/lib/db/documents'
+import { Tooltip } from '../tooltip'
 
 export default function DocumentList({ initialDocuments }: { initialDocuments: DocumentSummary[] }) {
   const [documents, setDocuments] = useState<DocumentSummary[]>(initialDocuments)
@@ -44,7 +46,11 @@ export default function DocumentList({ initialDocuments }: { initialDocuments: D
   return (
     <div>
       <div className="mb-6">
-        <label className="inline-block cursor-pointer rounded-lg bg-blue-600 px-5 py-3 font-medium disabled:opacity-60">
+        <label
+          className="inline-flex cursor-pointer items-center gap-2 rounded-lg px-5 py-3 font-medium text-black disabled:opacity-60"
+          style={{ background: 'var(--accent-gradient)' }}
+        >
+          <Upload size={15} />
           {uploading ? 'Uploading…' : 'Upload PDF'}
           <input
             ref={fileInputRef}
@@ -55,29 +61,33 @@ export default function DocumentList({ initialDocuments }: { initialDocuments: D
             className="hidden"
           />
         </label>
-        {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+        {error && <p className="mt-2 text-sm text-[var(--danger)]">{error}</p>}
       </div>
 
       <div className="space-y-2">
-        {documents.length === 0 && <p className="text-neutral-400">No documents uploaded yet.</p>}
+        {documents.length === 0 && (
+          <p className="text-[var(--text-muted)]">No documents uploaded yet.</p>
+        )}
         {documents.map((doc) => (
           <div
             key={doc.id}
-            className="flex items-center justify-between gap-3 rounded-lg bg-neutral-900 p-3"
+            className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-white/[0.03] p-3"
           >
             <div className="min-w-0">
-              <div className="truncate">{doc.filename}</div>
-              <div className="text-xs text-neutral-400">
+              <div className="truncate text-[var(--text)]">{doc.filename}</div>
+              <div className="text-xs text-[var(--text-muted)]">
                 {new Date(doc.created_at).toLocaleString()}
               </div>
             </div>
-            <button
-              onClick={() => handleDelete(doc.id)}
-              title="Delete document"
-              className="shrink-0 text-neutral-400 hover:text-neutral-200"
-            >
-              ✕
-            </button>
+            <Tooltip label="Delete document">
+              <button
+                onClick={() => handleDelete(doc.id)}
+                aria-label="Delete document"
+                className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-red-500/10 hover:text-[var(--danger)]"
+              >
+                <X size={14} />
+              </button>
+            </Tooltip>
           </div>
         ))}
       </div>

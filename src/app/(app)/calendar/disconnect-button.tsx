@@ -21,7 +21,7 @@ export default function DisconnectButton() {
     <button
       onClick={handleDisconnect}
       disabled={loading}
-      className="rounded-lg border border-neutral-600 px-4 py-2 text-sm text-neutral-300 hover:border-neutral-400 disabled:opacity-60"
+      className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text)] disabled:opacity-60"
     >
       {loading ? 'Disconnecting…' : 'Disconnect'}
     </button>

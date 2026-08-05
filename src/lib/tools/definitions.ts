@@ -1,6 +1,6 @@
-import type { ChatCompletionTool } from 'openai/resources/chat/completions'
+import type { ChatCompletionFunctionTool } from 'openai/resources/chat/completions'
 
-export const TOOL_DEFINITIONS: ChatCompletionTool[] = [
+export const TOOL_DEFINITIONS: ChatCompletionFunctionTool[] = [
   {
     type: 'function',
     function: {

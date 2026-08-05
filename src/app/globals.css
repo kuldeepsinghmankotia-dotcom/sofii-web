@@ -19,6 +19,15 @@
   --danger: #f87171;
   --background: var(--bg);
   --foreground: var(--text);
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-glow-a: 0 0 20px rgba(34, 211, 238, 0.15);
+  --shadow-glow-b: 0 0 24px rgba(139, 92, 246, 0.18);
 }
 
 @theme inline {
@@ -78,6 +87,96 @@ body {
   .message-enter {
     animation: none;
   }
+}
+
+/* "Thinking" indicator shown in the assistant bubble before the first
+   streamed token arrives — the pre-first-token gap otherwise renders as a
+   blank bubble with no feedback that anything is happening. */
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.3em 0;
+}
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-muted);
+  animation: sofii-typing-bounce 1.1s ease-in-out infinite;
+}
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes sofii-typing-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .typing-dots span {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+/* Radix primitives (Dialog/DropdownMenu/Tooltip) drive these via their own
+   data-state attribute — plain CSS keyframes keep them dependency-free
+   rather than routing every primitive through framer-motion. */
+@keyframes sofii-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes sofii-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.radix-pop[data-state='open'] {
+  animation: sofii-pop-in 0.14s ease-out;
+}
+.radix-overlay[data-state='open'] {
+  animation: sofii-overlay-in 0.14s ease-out;
+}
+.radix-tooltip[data-state='delayed-open'] {
+  animation: sofii-pop-in 0.1s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .radix-pop[data-state='open'],
+  .radix-overlay[data-state='open'],
+  .radix-tooltip[data-state='delayed-open'] {
+    animation: none;
+  }
+}
+
+.model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  padding: 0.1em 0.55em;
+  font-size: 0.7rem;
+  color: var(--text-muted);
 }
 
 /* Compact markdown layout for assistant chat bubbles — tighter than a

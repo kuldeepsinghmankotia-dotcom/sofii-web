@@ -2,6 +2,8 @@
 
 import { useState, type KeyboardEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { motion } from 'framer-motion'
+import { Send } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { notifyConversationsChanged } from './sidebar'
 
@@ -81,23 +83,27 @@ export default function HomePage() {
         <button
           onClick={() => void start(input)}
           disabled={creating}
-          className="rounded-xl px-4 py-2 text-sm font-medium text-black disabled:opacity-60"
+          aria-label="Send message"
+          className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium text-black disabled:opacity-60"
           style={{ background: 'var(--accent-gradient)' }}
         >
-          {creating ? '…' : 'Send'}
+          {creating ? '…' : <Send size={14} />}
         </button>
       </div>
 
       <div className="grid w-full max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
-        {SUGGESTIONS.map((s) => (
-          <button
+        {SUGGESTIONS.map((s, i) => (
+          <motion.button
             key={s}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, delay: i * 0.04 }}
             onClick={() => void start(s)}
             disabled={creating}
             className="rounded-xl border border-[var(--border)] px-4 py-3 text-left text-sm text-[var(--text-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--text)] disabled:opacity-60"
           >
             {s}
-          </button>
+          </motion.button>
         ))}
       </div>
     </div>

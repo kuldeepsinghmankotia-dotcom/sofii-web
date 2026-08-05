@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono, Orbitron } from 'next/font/google'
+import { Toaster } from 'sonner'
 import './globals.css'
 
 const geistSans = Geist({
@@ -32,7 +33,22 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${orbitron.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">{children}</body>
+      <body className="flex min-h-full flex-col">
+        {children}
+        <Toaster
+          theme="dark"
+          position="bottom-center"
+          toastOptions={{
+            className: 'glass',
+            style: {
+              background: 'var(--bg-glass)',
+              border: '1px solid var(--border-strong)',
+              color: 'var(--text)',
+              borderRadius: 'var(--radius-lg)'
+            }
+          }}
+        />
+      </body>
     </html>
   )
 }
