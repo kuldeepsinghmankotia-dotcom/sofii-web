@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from 'react'
 import Sidebar from './sidebar'
+import CommandPalette from './command-palette'
 import ReminderPoller from './reminder-poller'
 import type { ConversationSummary } from '@/lib/db/conversations'
 
@@ -42,6 +43,7 @@ export default function AppShell({
         <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
       </div>
       <ReminderPoller />
+      <CommandPalette />
     </div>
   )
 }

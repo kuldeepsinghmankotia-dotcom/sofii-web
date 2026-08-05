@@ -9,6 +9,7 @@ import {
   type KeyboardEvent,
   type ReactNode
 } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -220,14 +221,20 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   } | null>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [micStream, setMicStream] = useState<MediaStream | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<BlobPart[]>([])
   const imageInputRef = useRef<HTMLInputElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const vadStopRef = useRef<(() => void) | null>(null)
   const heardSpeechRef = useRef(true)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const prefillSentRef = useRef(false)
+  const router = useRouter()
+  const searchParams = useSearchParams()
 
   useEffect(() => {
     return () => {
@@ -251,6 +258,17 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       if (pendingImage) URL.revokeObjectURL(pendingImage.previewUrl)
     }
   }, [pendingImage])
+
+  // Auto-growing composer (ChatGPT-style: starts single-line, grows with
+  // content up to a cap, then scrolls) — recalculated by resetting to
+  // 'auto' first so shrinking (e.g. after clearing on send) isn't stuck at
+  // whatever the tallest height was.
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+  }, [input])
 
   const speak = (text: string, onEnd?: () => void): void => {
     if (!speakEnabled || !text.trim()) {
@@ -391,6 +409,39 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     notifyConversationsChanged()
   }
 
+  const startEdit = (message: ChatMessage): void => {
+    setEditingId(message.id)
+    setEditValue(message.content)
+  }
+
+  const cancelEdit = (): void => {
+    setEditingId(null)
+    setEditValue('')
+  }
+
+  // Edits a past user message and resends it as a fresh turn — everything
+  // from that message onward (its old reply, and any later turns) is
+  // discarded both locally and in the DB, matching ChatGPT's "edit rewinds
+  // the conversation" behavior rather than just changing the text in place.
+  const commitEdit = async (id: string): Promise<void> => {
+    const newContent = editValue.trim()
+    setEditingId(null)
+    if (!newContent || sending) return
+
+    const index = messages.findIndex((m) => m.id === id)
+    if (index === -1) return
+
+    const idsToDelete = messages.slice(index).map((m) => m.id)
+    setMessages((prev) => prev.slice(0, index))
+
+    if (idsToDelete.length > 0) {
+      const supabase = createClient()
+      await supabase.from('messages').delete().in('id', idsToDelete)
+    }
+
+    await sendMessage(newContent)
+  }
+
   const sendMessage = async (overrideContent?: string): Promise<void> => {
     const content = overrideContent ?? input
     if ((!content.trim() && !pendingImage) || sending) return
@@ -492,8 +543,29 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     })
   }
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter') sendMessage()
+  // Home page's suggested-prompt / inline composer creates the conversation
+  // first, then navigates here with the text as a query param — this fires
+  // that first message once the chat window itself has mounted, then strips
+  // the param so a refresh (or the browser back button) doesn't resend it.
+  // prefillSentRef guards against React 18 Strict Mode's dev-only
+  // double-invoke of effects, which would otherwise send this message
+  // twice — the empty dependency array alone isn't enough since Strict
+  // Mode intentionally re-runs a fresh mount's effects once to surface
+  // exactly this kind of non-idempotent side effect.
+  useEffect(() => {
+    const prefill = searchParams.get('prefill')
+    if (!prefill || prefillSentRef.current) return
+    prefillSentRef.current = true
+    router.replace(`/c/${conversationId}`)
+    void sendMessage(prefill)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessage()
+    }
   }
 
   const startRecording = async (options?: { autoStopOnSilence?: boolean }): Promise<void> => {
@@ -758,15 +830,59 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
                         className="mb-2 max-h-64 max-w-full rounded-lg object-contain"
                       />
                     )}
-                    <div
-                      className="rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap text-black"
-                      style={{ background: 'var(--accent-gradient)' }}
-                    >
-                      {m.content}
-                    </div>
-                    <div className="mt-1 flex justify-end opacity-0 transition group-hover:opacity-100">
-                      <CopyButton content={m.content} />
-                    </div>
+                    {editingId === m.id ? (
+                      <div className="rounded-2xl rounded-tr-sm border border-[var(--border-strong)] bg-black/30 p-2">
+                        <textarea
+                          autoFocus
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault()
+                              void commitEdit(m.id)
+                            } else if (e.key === 'Escape') {
+                              cancelEdit()
+                            }
+                          }}
+                          rows={Math.min(8, editValue.split('\n').length)}
+                          className="w-full resize-none bg-transparent text-sm text-[var(--text)] outline-none"
+                        />
+                        <div className="mt-1 flex justify-end gap-2 text-xs">
+                          <button
+                            onClick={cancelEdit}
+                            className="rounded-md px-2 py-1 text-[var(--text-muted)] hover:bg-white/10"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => void commitEdit(m.id)}
+                            className="rounded-md px-2 py-1 font-medium text-black"
+                            style={{ background: 'var(--accent-gradient)' }}
+                          >
+                            Save & submit
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div
+                          className="rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap text-black"
+                          style={{ background: 'var(--accent-gradient)' }}
+                        >
+                          {m.content}
+                        </div>
+                        <div className="mt-1 flex justify-end gap-1 opacity-0 transition group-hover:opacity-100">
+                          <CopyButton content={m.content} />
+                          <button
+                            onClick={() => startEdit(m)}
+                            title="Edit"
+                            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+                          >
+                            ✎ Edit
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="flex gap-3">
@@ -847,7 +963,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
           </button>
         </div>
       ) : (
-        <div className="accent-ring mx-auto mt-4 flex w-full max-w-3xl items-center gap-2 rounded-2xl border border-[var(--border)] bg-white/[0.03] p-2">
+        <div className="accent-ring mx-auto mt-4 flex w-full max-w-3xl items-end gap-2 rounded-2xl border border-[var(--border)] bg-white/[0.03] p-2">
           <button
             onClick={toggleRecording}
             disabled={isTranscribing}
@@ -871,12 +987,14 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
             onChange={handleImageSelect}
             className="hidden"
           />
-          <input
+          <textarea
+            ref={composerRef}
+            rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message Sofii..."
-            className="flex-1 bg-transparent p-2 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+            placeholder="Message Sofii... (Shift+Enter for a new line)"
+            className="max-h-[200px] flex-1 resize-none bg-transparent p-2 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
           />
           <button
             onClick={sending ? handleStop : () => sendMessage()}

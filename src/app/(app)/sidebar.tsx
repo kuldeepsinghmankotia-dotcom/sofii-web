@@ -200,13 +200,16 @@ export default function Sidebar({
           </button>
         </div>
 
-        <div className="accent-ring shrink-0 rounded-xl px-3 pb-3">
+        <div className="accent-ring relative shrink-0 rounded-xl px-3 pb-3">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search chats"
-            className="w-full rounded-lg border border-[var(--border)] bg-black/20 px-3 py-1.5 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+            className="w-full rounded-lg border border-[var(--border)] bg-black/20 px-3 py-1.5 pr-12 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
           />
+          <kbd className="pointer-events-none absolute top-1/2 right-5 -translate-y-1/2 rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]">
+            ⌘K
+          </kbd>
         </div>
 
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
