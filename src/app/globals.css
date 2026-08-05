@@ -1,8 +1,24 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
+/* Sofii's design tokens — a near-black "deep space" ground with a
+   cyan-to-violet signal running through every accent, active state, and
+   glow. Text and borders lean slightly blue rather than pure grey/white, so
+   the whole thing reads as one deliberate palette instead of default
+   Tailwind neutrals with an accent color bolted on. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #05060b;
+  --bg-elevated: #0c0e18;
+  --bg-glass: rgba(13, 15, 26, 0.7);
+  --border: rgba(129, 140, 248, 0.16);
+  --border-strong: rgba(129, 140, 248, 0.32);
+  --text: #e8eaf6;
+  --text-muted: #8790ab;
+  --accent-a: #22d3ee;
+  --accent-b: #8b5cf6;
+  --accent-gradient: linear-gradient(135deg, var(--accent-a), var(--accent-b));
+  --danger: #f87171;
+  --background: var(--bg);
+  --foreground: var(--text);
 }
 
 @theme inline {
@@ -10,19 +26,58 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-display: var(--font-orbitron);
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(ellipse 60% 40% at 15% -10%, rgba(139, 92, 246, 0.16), transparent),
+    radial-gradient(ellipse 50% 35% at 100% 0%, rgba(34, 211, 238, 0.12), transparent),
+    var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Shared "futuristic" surface treatments, reused across the sidebar,
+   composer, and message actions rather than one-off styles per component. */
+.glass {
+  background: var(--bg-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.accent-text {
+  background: var(--accent-gradient);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+.accent-ring:focus-within {
+  border-color: var(--border-strong);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.25),
+    0 0 24px rgba(139, 92, 246, 0.18);
+}
+.font-display {
+  font-family: var(--font-orbitron), var(--font-geist-sans), sans-serif;
+}
+
+@keyframes sofii-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.message-enter {
+  animation: sofii-fade-up 0.25s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .message-enter {
+    animation: none;
+  }
 }
 
 /* Compact markdown layout for assistant chat bubbles — tighter than a
@@ -80,40 +135,27 @@ body {
   color: inherit;
 }
 .md a {
-  color: #93c5fd;
+  color: var(--accent-a);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .md blockquote {
   margin: 0.5em 0;
   padding-left: 0.75em;
-  border-left: 2px solid rgba(255, 255, 255, 0.25);
-  color: rgba(255, 255, 255, 0.75);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-muted);
 }
 .md code {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(129, 140, 248, 0.14);
   border-radius: 0.25em;
   padding: 0.1em 0.35em;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.875em;
 }
-.md pre {
-  margin: 0.6em 0;
-  padding: 0.75em 0.9em;
-  border-radius: 0.6em;
-  background: #0d0d0d;
-  overflow-x: auto;
-}
-.md pre code {
-  background: none;
-  padding: 0;
-  font-size: 0.85em;
-  line-height: 1.5;
-}
 .md hr {
   margin: 0.75em 0;
   border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-top: 1px solid var(--border);
 }
 .md table {
   margin: 0.5em 0;
@@ -124,11 +166,90 @@ body {
 }
 .md th,
 .md td {
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--border);
   padding: 0.35em 0.6em;
   text-align: left;
 }
 .md th {
   font-weight: 600;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(129, 140, 248, 0.08);
+}
+
+/* Code blocks: rehype-highlight wraps each block in a header (language
+   label + copy button, added in AssistantContent) so .md's own <pre>
+   styling only needs to handle the code surface itself. */
+.code-block {
+  margin: 0.6em 0;
+  border-radius: 0.65em;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #090a12;
+}
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4em 0.5em 0.4em 0.9em;
+  font-size: 0.75em;
+  color: var(--text-muted);
+  background: rgba(129, 140, 248, 0.06);
+  border-bottom: 1px solid var(--border);
+}
+.code-block-copy {
+  border-radius: 0.4em;
+  padding: 0.2em 0.55em;
+  color: var(--text-muted);
+}
+.code-block-copy:hover {
+  background: rgba(129, 140, 248, 0.14);
+  color: var(--text);
+}
+.md pre {
+  margin: 0;
+  padding: 0.75em 0.9em;
+  overflow-x: auto;
+}
+.md pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+
+/* Custom highlight.js theme (via rehype-highlight) tuned to the app's own
+   cyan/violet palette rather than importing a stock hljs theme with its own
+   unrelated color scheme. */
+.hljs {
+  color: var(--text);
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-tag {
+  color: #f472b6;
+}
+.hljs-string,
+.hljs-attr,
+.hljs-template-tag {
+  color: #a5f3fc;
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-built_in,
+.hljs-name {
+  color: #22d3ee;
+}
+.hljs-number,
+.hljs-variable,
+.hljs-attribute {
+  color: #c4b5fd;
+}
+.hljs-comment,
+.hljs-quote {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.hljs-punctuation,
+.hljs-operator {
+  color: var(--text-muted);
 }

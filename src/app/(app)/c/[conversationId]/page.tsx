@@ -24,8 +24,10 @@ export default async function ConversationPage({
     // visible viewport. Relying on the (app) layout's own flex/dvh chain
     // (main is flex-1) means this always exactly fills whatever space is
     // actually available, however tall the header ends up being.
-    <div className="mx-auto flex h-full max-w-2xl flex-col p-6">
-      <h1 className="mb-4 shrink-0 text-lg font-bold">{conversation.title}</h1>
+    <div className="flex h-full flex-col p-4 sm:p-6">
+      <h1 className="mx-auto mb-4 w-full max-w-3xl shrink-0 truncate text-sm font-medium text-[var(--text-muted)]">
+        {conversation.title}
+      </h1>
       <ChatWindow conversationId={conversationId} initialMessages={messages} />
     </div>
   )

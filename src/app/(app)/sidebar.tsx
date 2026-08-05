@@ -166,52 +166,60 @@ export default function Sidebar({
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col border-r border-neutral-800 bg-neutral-950 transition-transform duration-200 ease-out md:static md:z-auto md:translate-x-0 ${
+        className={`glass fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col border-r border-[var(--border)] transition-transform duration-200 ease-out md:static md:z-auto md:translate-x-0 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="flex shrink-0 items-center justify-between px-3 pt-4 pb-2">
-          <Link href="/" onClick={onClose} className="text-lg font-bold tracking-tight">
-            Sofii
+        <div className="flex shrink-0 items-center justify-between px-4 pt-5 pb-3">
+          <Link
+            href="/"
+            onClick={onClose}
+            className="font-display accent-text text-lg tracking-wide"
+          >
+            SOFII
           </Link>
           <button
             onClick={onClose}
             aria-label="Close sidebar"
-            className="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-900 hover:text-white md:hidden"
+            className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text)] md:hidden"
           >
             ✕
           </button>
         </div>
 
-        <div className="shrink-0 px-3 pb-2">
+        <div className="shrink-0 px-3 pb-3">
           <button
             onClick={handleNewChat}
             disabled={creating}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-700 px-3 py-2 text-sm font-medium hover:bg-neutral-900 disabled:opacity-60"
+            className="relative flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-strong)] px-3 py-2.5 text-sm font-medium text-[var(--text)] transition hover:border-[var(--accent-a)] hover:shadow-[0_0_20px_rgba(34,211,238,0.15)] disabled:opacity-60"
           >
-            <span aria-hidden="true">+</span>
+            <span aria-hidden="true" className="accent-text text-base leading-none">
+              +
+            </span>
             {creating ? 'Creating…' : 'New chat'}
           </button>
         </div>
 
-        <div className="shrink-0 px-3 pb-2">
+        <div className="accent-ring shrink-0 rounded-xl px-3 pb-3">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search chats"
-            className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none placeholder:text-neutral-500"
+            className="w-full rounded-lg border border-[var(--border)] bg-black/20 px-3 py-1.5 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
           />
         </div>
 
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
           {groups.length === 0 && (
-            <p className="px-2 py-4 text-sm text-neutral-500">
+            <p className="px-2 py-4 text-sm text-[var(--text-muted)]">
               {query ? 'No matching chats.' : 'No chats yet.'}
             </p>
           )}
           {groups.map((group) => (
             <div key={group.label} className="mb-3">
-              <h2 className="px-2 pb-1 text-xs font-medium text-neutral-500">{group.label}</h2>
+              <h2 className="px-2 pb-1 text-xs font-medium tracking-wide text-[var(--text-muted)] uppercase">
+                {group.label}
+              </h2>
               <ul className="space-y-0.5">
                 {group.items.map((c) => (
                   <li key={c.id}>
@@ -222,21 +230,21 @@ export default function Sidebar({
                         onChange={(e) => setRenameValue(e.target.value)}
                         onKeyDown={handleRenameKeyDown(c.id)}
                         onBlur={() => void commitRename(c.id)}
-                        className="w-full rounded-lg bg-neutral-800 px-2 py-1.5 text-sm outline-none"
+                        className="w-full rounded-lg border border-[var(--border-strong)] bg-black/30 px-2 py-1.5 text-sm text-[var(--text)] outline-none"
                       />
                     ) : confirmDeleteId === c.id ? (
-                      <div className="flex items-center justify-between gap-1 rounded-lg bg-neutral-900 px-2 py-1.5 text-sm">
-                        <span className="truncate text-neutral-300">Delete this chat?</span>
+                      <div className="flex items-center justify-between gap-1 rounded-lg bg-white/5 px-2 py-1.5 text-sm">
+                        <span className="truncate text-[var(--text-muted)]">Delete this chat?</span>
                         <div className="flex shrink-0 gap-1">
                           <button
                             onClick={() => void handleDelete(c.id)}
-                            className="rounded px-1.5 py-0.5 text-red-400 hover:bg-red-500/10"
+                            className="rounded px-1.5 py-0.5 text-[var(--danger)] hover:bg-red-500/10"
                           >
                             Yes
                           </button>
                           <button
                             onClick={() => setConfirmDeleteId(null)}
-                            className="rounded px-1.5 py-0.5 text-neutral-400 hover:bg-neutral-800"
+                            className="rounded px-1.5 py-0.5 text-[var(--text-muted)] hover:bg-white/10"
                           >
                             No
                           </button>
@@ -244,28 +252,35 @@ export default function Sidebar({
                       </div>
                     ) : (
                       <div
-                        className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm ${
-                          activeId === c.id ? 'bg-neutral-800' : 'hover:bg-neutral-900'
+                        className={`group relative flex items-center gap-1 rounded-lg py-1.5 pr-1 pl-3 text-sm ${
+                          activeId === c.id ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'
                         }`}
                       >
+                        {activeId === c.id && (
+                          <span
+                            aria-hidden="true"
+                            className="absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-full"
+                            style={{ background: 'var(--accent-gradient)' }}
+                          />
+                        )}
                         <Link
                           href={`/c/${c.id}`}
                           onClick={onClose}
-                          className="min-w-0 flex-1 truncate"
+                          className={`min-w-0 flex-1 truncate ${activeId === c.id ? 'text-[var(--text)]' : 'text-[var(--text-muted)] group-hover:text-[var(--text)]'}`}
                         >
                           {c.title}
                         </Link>
                         <button
                           onClick={() => startRename(c)}
                           title="Rename"
-                          className="shrink-0 rounded p-1 text-neutral-500 opacity-0 hover:bg-neutral-800 hover:text-white group-hover:opacity-100"
+                          className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 hover:bg-white/10 hover:text-[var(--text)] group-hover:opacity-100"
                         >
                           ✎
                         </button>
                         <button
                           onClick={() => setConfirmDeleteId(c.id)}
                           title="Delete"
-                          className="shrink-0 rounded p-1 text-neutral-500 opacity-0 hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
+                          className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 hover:bg-red-500/10 hover:text-[var(--danger)] group-hover:opacity-100"
                         >
                           🗑
                         </button>
@@ -278,7 +293,7 @@ export default function Sidebar({
           ))}
         </nav>
 
-        <div className="shrink-0 border-t border-neutral-800 px-2 py-2">
+        <div className="shrink-0 border-t border-[var(--border)] px-2 py-2">
           {SECONDARY_LINKS.map((link) => (
             <Link
               key={link.href}
@@ -286,8 +301,8 @@ export default function Sidebar({
               onClick={onClose}
               className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${
                 pathname === link.href
-                  ? 'bg-neutral-800 text-white'
-                  : 'text-neutral-300 hover:bg-neutral-900 hover:text-white'
+                  ? 'bg-white/[0.06] text-[var(--text)]'
+                  : 'text-[var(--text-muted)] hover:bg-white/[0.04] hover:text-[var(--text)]'
               }`}
             >
               <span aria-hidden="true">{link.icon}</span>
@@ -296,9 +311,11 @@ export default function Sidebar({
           ))}
         </div>
 
-        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-neutral-800 px-3 py-2.5 text-xs text-neutral-400">
-          <span className="truncate">{userEmail}</span>
-          <SignOutButton />
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] px-3 py-2.5 text-xs text-[var(--text-muted)]">
+          <span className="min-w-0 truncate">{userEmail}</span>
+          <span className="shrink-0">
+            <SignOutButton />
+          </span>
         </div>
       </aside>
     </>

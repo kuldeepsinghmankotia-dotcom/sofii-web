@@ -1,8 +1,17 @@
 'use client'
 
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import {
+  isValidElement,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type ReactNode
+} from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import rehypeHighlight from 'rehype-highlight'
 import { createClient } from '@/lib/supabase/client'
 import { resizeImageToJpeg } from '@/lib/image/resize'
 import VoiceOrb from './voice-orb'
@@ -97,6 +106,69 @@ function attachSilenceAutoStop(
   return cleanup
 }
 
+function CopyButton({ content, label }: { content: string; label?: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard access can be denied/unavailable in some browser contexts
+      // — not worth surfacing an error for a copy button.
+    }
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy"
+      className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+    >
+      {copied ? '✓ Copied' : `⧉ ${label ?? 'Copy'}`}
+    </button>
+  )
+}
+
+// rehype-highlight (wired in below) tags fenced code blocks' inner <code>
+// with a `language-xxx` class; this wraps that in a small header (language
+// label + a copy button reading the rendered <pre>'s own text, so it always
+// copies exactly what's on screen) instead of a bare unlabeled block —
+// matching the Copilot/ChatGPT code-block treatment.
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const preRef = useRef<HTMLPreElement>(null)
+  const [copied, setCopied] = useState(false)
+
+  const codeElement = Array.isArray(children) ? children[0] : children
+  const language = isValidElement<{ className?: string }>(codeElement)
+    ? (codeElement.props.className ?? '').match(/language-(\w+)/)?.[1]
+    : undefined
+
+  const handleCopy = async (): Promise<void> => {
+    const text = preRef.current?.textContent ?? ''
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard access can be denied/unavailable — not worth an error UI.
+    }
+  }
+
+  return (
+    <div className="code-block">
+      <div className="code-block-header">
+        <span>{language ?? 'code'}</span>
+        <button onClick={handleCopy} className="code-block-copy">
+          {copied ? '✓ Copied' : '⧉ Copy'}
+        </button>
+      </div>
+      <pre ref={preRef}>{children}</pre>
+    </div>
+  )
+}
+
 // Renders assistant replies as structured markdown (headings, lists, bold,
 // code, tables) instead of one raw text blob — the "ChatGPT/Copilot" look
 // the user asked for. Tight custom element spacing (via the `md` class in
@@ -107,8 +179,10 @@ function AssistantContent({ content }: { content: string }) {
     <div className="md">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
         components={{
-          a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />
+          a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+          pre: (props) => <CodeBlock>{props.children}</CodeBlock>
         }}
       >
         {content}
@@ -153,6 +227,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const vadStopRef = useRef<(() => void) | null>(null)
   const heardSpeechRef = useRef(true)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     return () => {
@@ -238,6 +313,84 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     setPendingImage(null)
   }
 
+  // Shared by sendMessage and regenerate: POSTs to /api/chat and streams the
+  // response into the given placeholder message. Wired to an AbortController
+  // so a Stop click (see handleStop) can cut generation short — the reading
+  // loop's AbortError is caught and treated as a clean stop (whatever
+  // streamed so far is kept as the final content), not an error state.
+  const streamReplyInto = async (
+    assistantId: string,
+    payload: { content?: string; imageUrl?: string; regenerate?: boolean }
+  ): Promise<{ content: string; ok: boolean }> => {
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+    let fullContent = ''
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId, ...payload }),
+        signal: controller.signal
+      })
+
+      if (!response.ok || !response.body) return { content: '', ok: false }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        fullContent += chunk
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + chunk } : m))
+        )
+      }
+
+      return { content: fullContent, ok: true }
+    } catch (err) {
+      const aborted = err instanceof DOMException && err.name === 'AbortError'
+      return { content: fullContent, ok: aborted }
+    } finally {
+      abortControllerRef.current = null
+    }
+  }
+
+  const handleStop = (): void => {
+    abortControllerRef.current?.abort()
+  }
+
+  // Deletes the current reply and asks the server for a fresh one from the
+  // same, already-stored user message (regenerate: true tells the route to
+  // skip inserting a new user message and reuse the last one in history —
+  // see api/chat/route.ts).
+  const regenerate = async (assistantId: string): Promise<void> => {
+    if (sending) return
+    const target = messages.find((m) => m.id === assistantId)
+    if (!target || target.role !== 'assistant') return
+
+    setSending(true)
+    setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: '' } : m)))
+
+    const supabase = createClient()
+    await supabase.from('messages').delete().eq('id', assistantId)
+
+    const { ok } = await streamReplyInto(assistantId, { regenerate: true })
+    setSending(false)
+
+    if (!ok) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === assistantId ? { ...m, content: 'Something went wrong.' } : m))
+      )
+      return
+    }
+
+    notifyConversationsChanged()
+  }
+
   const sendMessage = async (overrideContent?: string): Promise<void> => {
     const content = overrideContent ?? input
     if ((!content.trim() && !pendingImage) || sending) return
@@ -304,37 +457,16 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
 
     setMessages((prev) => [...prev, userMessage, assistantPlaceholder])
 
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationId, content, imageUrl })
-    })
+    const { content: fullContent, ok } = await streamReplyInto(assistantId, { content, imageUrl })
+    setSending(false)
 
-    if (!response.ok || !response.body) {
+    if (!ok) {
       setMessages((prev) =>
         prev.map((m) => (m.id === assistantId ? { ...m, content: 'Something went wrong.' } : m))
       )
-      setSending(false)
       setVoiceTurnActive(false)
       return
     }
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let fullContent = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      const chunk = decoder.decode(value, { stream: true })
-      fullContent += chunk
-      setMessages((prev) =>
-        prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + chunk } : m))
-      )
-    }
-
-    setSending(false)
 
     // Bumps this conversation to the top of the sidebar's list right away.
     // If this was the conversation's first exchange, the server also
@@ -562,8 +694,11 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="mb-2 flex items-center justify-end gap-3">
         {isWakeListening && (
-          <span className="flex items-center gap-1.5 text-xs text-neutral-500">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+          <span className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+            <span
+              className="h-2 w-2 animate-pulse rounded-full"
+              style={{ background: 'var(--accent-gradient)' }}
+            />
             Listening for &ldquo;Sofii&rdquo;…
           </span>
         )}
@@ -580,9 +715,12 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
             })
           }}
           title={wakeWordEnabled ? 'Jarvis mode on — say "Sofii" anytime' : 'Enable Jarvis mode'}
-          className={`rounded-full px-3 py-1 text-xs font-medium ${
-            wakeWordEnabled ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-neutral-300'
+          className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+            wakeWordEnabled
+              ? 'text-black'
+              : 'border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]'
           }`}
+          style={wakeWordEnabled ? { background: 'var(--accent-gradient)' } : undefined}
         >
           🪄 Jarvis
         </button>
@@ -600,41 +738,93 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
         </button>
       </div>
 
-      <div ref={messagesContainerRef} className="flex-1 space-y-3 overflow-y-auto">
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={`max-w-[75%] rounded-xl p-3 ${
-              m.role === 'user' ? 'ml-auto whitespace-pre-wrap bg-blue-600' : 'bg-neutral-800'
-            }`}
-          >
-            {m.image_url && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={m.image_url}
-                alt="Attached"
-                className="mb-2 max-h-64 max-w-full rounded-lg object-contain"
-              />
-            )}
-            {m.role === 'user' ? m.content : <AssistantContent content={m.content} />}
-          </div>
-        ))}
-        {isTranscribing && <div className="ml-auto text-sm text-neutral-400">Transcribing…</div>}
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-1 py-2">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
+          {messages.map((m, i) => {
+            const isLastAssistantReply =
+              m.role === 'assistant' && i === messages.length - 1 && !!m.content && !sending
+            return (
+              <div
+                key={m.id}
+                className={`message-enter group ${m.role === 'user' ? 'flex justify-end' : ''}`}
+              >
+                {m.role === 'user' ? (
+                  <div className="max-w-[75%]">
+                    {m.image_url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={m.image_url}
+                        alt="Attached"
+                        className="mb-2 max-h-64 max-w-full rounded-lg object-contain"
+                      />
+                    )}
+                    <div
+                      className="rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap text-black"
+                      style={{ background: 'var(--accent-gradient)' }}
+                    >
+                      {m.content}
+                    </div>
+                    <div className="mt-1 flex justify-end opacity-0 transition group-hover:opacity-100">
+                      <CopyButton content={m.content} />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex gap-3">
+                    <div
+                      aria-hidden="true"
+                      className="mt-0.5 h-7 w-7 shrink-0 rounded-full"
+                      style={{
+                        background: 'var(--accent-gradient)',
+                        boxShadow: '0 0 14px rgba(139,92,246,0.45)'
+                      }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      {m.image_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={m.image_url}
+                          alt="Attached"
+                          className="mb-2 max-h-64 max-w-full rounded-lg object-contain"
+                        />
+                      )}
+                      <AssistantContent content={m.content} />
+                      <div className="mt-1 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                        <CopyButton content={m.content} />
+                        {isLastAssistantReply && (
+                          <button
+                            onClick={() => void regenerate(m.id)}
+                            title="Regenerate"
+                            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+                          >
+                            ↻ Regenerate
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {isTranscribing && <div className="text-sm text-[var(--text-muted)]">Transcribing…</div>}
+        </div>
       </div>
 
       {pendingImage && (
-        <div className="mt-3 flex items-center gap-2 rounded-lg bg-neutral-800 p-2">
+        <div className="mx-auto mt-3 flex w-full max-w-3xl items-center gap-2 rounded-lg border border-[var(--border)] bg-white/[0.03] p-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={pendingImage.previewUrl}
             alt="To send"
             className="h-12 w-12 rounded object-cover"
           />
-          <span className="flex-1 truncate text-sm text-neutral-300">{pendingImage.file.name}</span>
+          <span className="flex-1 truncate text-sm text-[var(--text-muted)]">
+            {pendingImage.file.name}
+          </span>
           <button
             onClick={clearPendingImage}
             title="Remove image"
-            className="text-neutral-400 hover:text-neutral-200"
+            className="text-[var(--text-muted)] hover:text-[var(--text)]"
           >
             ✕
           </button>
@@ -647,22 +837,22 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
         // Live/Jarvis, not a small inline indicator.
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-black/90 backdrop-blur-sm">
           <VoiceOrb stream={micStream} size={260} />
-          <p className="text-sm text-neutral-400">Listening…</p>
+          <p className="text-sm text-[var(--text-muted)]">Listening…</p>
           <button
             onClick={stopRecording}
             title="Stop recording"
-            className="rounded-full bg-red-600 px-8 py-3 font-medium"
+            className="rounded-full bg-red-600 px-8 py-3 font-medium text-white"
           >
             Stop
           </button>
         </div>
       ) : (
-        <div className="mt-4 flex gap-2">
+        <div className="accent-ring mx-auto mt-4 flex w-full max-w-3xl items-center gap-2 rounded-2xl border border-[var(--border)] bg-white/[0.03] p-2">
           <button
             onClick={toggleRecording}
             disabled={isTranscribing}
             title="Start recording"
-            className="rounded-lg bg-neutral-800 px-4 py-3 font-medium disabled:opacity-60"
+            className="rounded-xl px-3 py-2.5 text-lg hover:bg-white/5 disabled:opacity-60"
           >
             🎙️
           </button>
@@ -670,7 +860,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
             onClick={() => imageInputRef.current?.click()}
             disabled={uploadingImage}
             title="Attach an image"
-            className="rounded-lg bg-neutral-800 px-4 py-3 font-medium disabled:opacity-60"
+            className="rounded-xl px-3 py-2.5 text-lg hover:bg-white/5 disabled:opacity-60"
           >
             🖼️
           </button>
@@ -685,15 +875,18 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type your message..."
-            className="flex-1 rounded-lg bg-neutral-800 p-3 outline-none"
+            placeholder="Message Sofii..."
+            className="flex-1 bg-transparent p-2 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
           />
           <button
-            onClick={() => sendMessage()}
-            disabled={sending || uploadingImage}
-            className="rounded-lg bg-blue-600 px-5 py-3 font-medium disabled:opacity-60"
+            onClick={sending ? handleStop : () => sendMessage()}
+            disabled={uploadingImage}
+            className={`rounded-xl px-5 py-2.5 text-sm font-medium text-black transition disabled:opacity-60 ${
+              sending ? 'bg-red-500 text-white' : ''
+            }`}
+            style={sending ? undefined : { background: 'var(--accent-gradient)' }}
           >
-            {uploadingImage ? 'Uploading…' : 'Send'}
+            {uploadingImage ? 'Uploading…' : sending ? 'Stop' : 'Send'}
           </button>
         </div>
       )}

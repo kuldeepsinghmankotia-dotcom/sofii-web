@@ -63,7 +63,11 @@ function toContentParam(
 async function streamOneRound(
   messages: ChatCompletionMessageParam[],
   toolOptions: { tools?: ChatCompletionTool[]; tool_choice?: ChatCompletionToolChoiceOption },
-  model: { name: string; maxTokens: number; reasoning: GroqReasoningParams | GroqVisionReasoningParams },
+  model: {
+    name: string
+    maxTokens: number
+    reasoning: GroqReasoningParams | GroqVisionReasoningParams
+  },
   onContent: (delta: string) => void
 ): Promise<AccumulatedToolCall[]> {
   const stream = await getGroqClient().chat.completions.create({
@@ -94,7 +98,8 @@ async function streamOneRound(
         }
         if (toolCallDelta.id) existing.id = toolCallDelta.id
         if (toolCallDelta.function?.name) existing.name = toolCallDelta.function.name
-        if (toolCallDelta.function?.arguments) existing.argumentsJson += toolCallDelta.function.arguments
+        if (toolCallDelta.function?.arguments)
+          existing.argumentsJson += toolCallDelta.function.arguments
         toolCallsByIndex.set(toolCallDelta.index, existing)
       }
     }
@@ -136,13 +141,14 @@ async function autoTitleConversation(
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
-  const { conversationId, content, imageUrl } = (await request.json()) as {
+  const { conversationId, content, imageUrl, regenerate } = (await request.json()) as {
     conversationId?: string
     content?: string
     imageUrl?: string
+    regenerate?: boolean
   }
 
-  if (!conversationId || !content?.trim()) {
+  if (!conversationId || (!regenerate && !content?.trim())) {
     return new Response('Missing conversationId or content', { status: 400 })
   }
 
@@ -165,19 +171,38 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   const history = await listMessages(supabase, conversationId)
-  const shouldAutoTitle = history.length === 0 && conversation.title === DEFAULT_CONVERSATION_TITLE
+  const shouldAutoTitle =
+    !regenerate && history.length === 0 && conversation.title === DEFAULT_CONVERSATION_TITLE
 
-  await insertMessage(supabase, {
-    conversationId,
-    userId: user.id,
-    role: 'user',
-    content,
-    imageUrl
-  })
+  // Regenerate reuses the last user message already in history instead of
+  // inserting a new one — the client already deleted the old assistant
+  // reply it's replacing (see chat-window.tsx's regenerate()), so the last
+  // history row really is the user turn to answer again.
+  let effectiveContent: string
+  let effectiveImageUrl: string | undefined
+
+  if (regenerate) {
+    const lastUserMessage = [...history].reverse().find((m) => m.role === 'user')
+    if (!lastUserMessage) {
+      return new Response('Nothing to regenerate', { status: 400 })
+    }
+    effectiveContent = lastUserMessage.content
+    effectiveImageUrl = lastUserMessage.image_url ?? undefined
+  } else {
+    effectiveContent = content!
+    effectiveImageUrl = imageUrl
+    await insertMessage(supabase, {
+      conversationId,
+      userId: user.id,
+      role: 'user',
+      content: effectiveContent,
+      imageUrl: effectiveImageUrl
+    })
+  }
 
   const relevantMemories = rankMemoriesByRelevance(
     await listMemories(supabase),
-    content,
+    effectiveContent,
     MEMORY_RECALL_LIMIT
   )
 
@@ -196,7 +221,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   let relevantChunks: { document_id: string; content: string }[] = []
   if (await hasAnyDocuments(supabase)) {
     try {
-      const queryEmbedding = await embedText(content)
+      const queryEmbedding = await embedText(effectiveContent)
       relevantChunks = await matchDocumentChunks(supabase, queryEmbedding, DOCUMENT_RECALL_LIMIT)
     } catch (error) {
       // Document recall is a bonus, not a hard dependency — a Gemini outage
@@ -230,15 +255,19 @@ export async function POST(request: NextRequest): Promise<Response> {
   // plain text below — the assistant's own prior reply already captured
   // what was in the image, so that context isn't actually lost, just not
   // re-paid for in image tokens every turn.
+  // On regenerate, `history` already ends with the user message being
+  // answered again (nothing new to append); otherwise the just-inserted
+  // user message is appended as a plain in-memory object rather than
+  // re-fetched from the DB.
   const currentMessage: ChatMessage = {
     id: '',
     role: 'user',
-    content,
+    content: effectiveContent,
     created_at: '',
-    image_url: imageUrl ?? null
+    image_url: effectiveImageUrl ?? null
   }
-  const conversationMessages = [...history, currentMessage]
-  const usesVision = !!imageUrl
+  const conversationMessages = regenerate ? history : [...history, currentMessage]
+  const usesVision = !!effectiveImageUrl
 
   // 1536 is real headroom now that SUPPRESS_VISION_REASONING includes
   // reasoning_effort: 'none' — reasoning is disabled outright rather than
@@ -329,7 +358,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         await touchConversation(supabase, conversationId)
 
         if (shouldAutoTitle) {
-          await autoTitleConversation(conversationId, content, fullContent, supabase)
+          await autoTitleConversation(conversationId, effectiveContent, fullContent, supabase)
         }
       }
     }

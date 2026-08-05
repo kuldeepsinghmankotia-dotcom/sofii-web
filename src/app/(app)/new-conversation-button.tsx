@@ -40,7 +40,8 @@ export default function NewConversationButton() {
     <button
       onClick={handleCreate}
       disabled={loading}
-      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium disabled:opacity-60"
+      className="rounded-xl px-5 py-2.5 text-sm font-medium text-black shadow-[0_0_30px_rgba(139,92,246,0.35)] transition hover:shadow-[0_0_40px_rgba(34,211,238,0.4)] disabled:opacity-60"
+      style={{ background: 'var(--accent-gradient)' }}
     >
       {loading ? 'Creating…' : '+ New conversation'}
     </button>
