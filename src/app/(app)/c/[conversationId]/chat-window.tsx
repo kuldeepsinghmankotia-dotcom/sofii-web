@@ -233,6 +233,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const prefillSentRef = useRef(false)
+  const activeRecordingIsHandsFreeRef = useRef(false)
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -442,7 +443,10 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     await sendMessage(newContent)
   }
 
-  const sendMessage = async (overrideContent?: string): Promise<void> => {
+  const sendMessage = async (
+    overrideContent?: string,
+    options?: { fromHandsFree?: boolean }
+  ): Promise<void> => {
     const content = overrideContent ?? input
     if ((!content.trim() && !pendingImage) || sending) return
 
@@ -531,11 +535,16 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
 
     // In hands-free mode, keep the conversation going after the spoken
     // reply finishes — a real Jarvis-style back-and-forth instead of
-    // requiring the wake word again for every turn. If the user says
+    // requiring the wake word again for every turn. Gated on
+    // options?.fromHandsFree (not just wakeWordEnabled) so this only
+    // chains additional turns onto an ALREADY hands-free exchange (wake
+    // word, or a previous auto-continue) — a manually typed message or a
+    // manual mic press no longer reopens the mic afterward just because
+    // Jarvis mode happens to be toggled on elsewhere. If the user says
     // nothing, the VAD's own give-up timeout (see attachSilenceAutoStop)
     // drops this back to passive wake-word listening on its own.
     speak(fullContent, () => {
-      if (wakeWordEnabled) {
+      if (wakeWordEnabled && options?.fromHandsFree) {
         void startRecording({ autoStopOnSilence: true })
       } else {
         setVoiceTurnActive(false)
@@ -577,6 +586,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     // by voiceTurnActive, letting the wake-word listener incorrectly
     // re-arm mid-turn.
     if (options?.autoStopOnSilence) setVoiceTurnActive(true)
+    activeRecordingIsHandsFreeRef.current = !!options?.autoStopOnSilence
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -621,8 +631,11 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
           const { text } = (await response.json()) as { text: string }
           if (text.trim()) {
             // sendMessage clears voiceTurnActive itself once the whole
-            // reply (including speaking it) is done.
-            await sendMessage(text.trim())
+            // reply (including speaking it) is done. fromHandsFree tells
+            // it whether it's allowed to auto-continue afterward — only
+            // true for a wake-word-triggered or auto-continued recording,
+            // never a manual push-to-talk one.
+            await sendMessage(text.trim(), { fromHandsFree: !!options?.autoStopOnSilence })
           } else {
             setVoiceTurnActive(false)
           }
@@ -659,6 +672,17 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     vadStopRef.current?.()
     vadStopRef.current = null
     if (mediaRecorderRef.current?.state === 'recording') {
+      // A manual Stop click during a hands-free (Jarvis) recording means
+      // "cancel this turn" — routed through the same "no speech heard"
+      // bail-out onstop already has for VAD giving up, skipping
+      // transcription entirely. Without this, stopping mid-turn still
+      // transcribed a near-silent clip; Whisper can hallucinate non-empty
+      // text from that, sending an unwanted message whose reply (Jarvis
+      // still on) reopened the mic again — the exact "stop doesn't stop,
+      // it reopens" loop this fixes. Manual (non-hands-free) push-to-talk
+      // recordings are unaffected: heardSpeechRef stays whatever it
+      // already was (true, since nothing else touches it in that path).
+      if (activeRecordingIsHandsFreeRef.current) heardSpeechRef.current = false
       mediaRecorderRef.current.stop()
     }
     setIsRecording(false)
