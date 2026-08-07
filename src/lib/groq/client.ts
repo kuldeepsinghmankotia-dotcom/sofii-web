@@ -10,13 +10,6 @@ export function getGroqModel(): string {
   return process.env.GROQ_MODEL || DEFAULT_GROQ_MODEL
 }
 
-export const SYSTEM_PROMPT =
-  'You are SOFII, a friendly, intelligent AI assistant. Format replies in markdown like ' +
-  'Copilot/ChatGPT: short paragraphs, bullet or numbered lists for multiple items or steps, ' +
-  '**bold** for key terms, and fenced code blocks for any code, commands, or file contents. ' +
-  'Use headings only for genuinely long, multi-section answers. Default to brief, scannable ' +
-  'answers over long prose — expand only when the question actually calls for detail.'
-
 // Groq-specific request fields not present in the openai SDK's types (hence
 // the intersection type on the call site rather than plain params).
 // openai/gpt-oss-120b is a reasoning model: by default it streams hidden

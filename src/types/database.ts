@@ -262,18 +262,21 @@ export type Database = {
           display_name: string | null
           email: string | null
           id: string
+          role: string
         }
         Insert: {
           created_at?: string
           display_name?: string | null
           email?: string | null
           id: string
+          role?: string
         }
         Update: {
           created_at?: string
           display_name?: string | null
           email?: string | null
           id?: string
+          role?: string
         }
         Relationships: []
       }
@@ -330,6 +333,44 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      system_prompts: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          is_active: boolean
+          key: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          key?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          key?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "system_prompts_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

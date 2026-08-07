@@ -18,16 +18,19 @@ const SECTION_TITLES: Record<string, string> = {
   '/memories': 'Memories',
   '/reminders': 'Reminders',
   '/documents': 'Documents',
-  '/calendar': 'Calendar'
+  '/calendar': 'Calendar',
+  '/admin/system-prompt': 'System Prompt'
 }
 
 export default function AppShell({
   initialConversations,
   userEmail,
+  isAdmin,
   children
 }: {
   initialConversations: ConversationSummary[]
   userEmail: string
+  isAdmin: boolean
   children: ReactNode
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -59,6 +62,7 @@ export default function AppShell({
         <Sidebar
           initialConversations={initialConversations}
           userEmail={userEmail}
+          isAdmin={isAdmin}
           open={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
         />

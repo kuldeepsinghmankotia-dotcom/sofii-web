@@ -36,10 +36,10 @@ import {
   getGroqModel,
   SUPPRESS_REASONING,
   SUPPRESS_VISION_REASONING,
-  SYSTEM_PROMPT,
   VISION_MODEL
 } from '@/lib/groq/client'
 import type { GroqReasoningParams, GroqVisionReasoningParams } from '@/lib/groq/client'
+import { getActiveSystemPrompt } from '@/lib/db/system-prompt'
 
 type Client = SupabaseClient<Database>
 type ModelChoice = 'groq' | 'gemini'
@@ -298,7 +298,8 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // The model needs "now" to resolve relative times ("in 10 minutes",
   // "tomorrow at 5pm") into the absolute ISO timestamp create_reminder needs.
-  let systemPrompt = `${SYSTEM_PROMPT}\n\nThe current date and time is ${new Date().toString()}.`
+  const activeSystemPrompt = await getActiveSystemPrompt(supabase)
+  let systemPrompt = `${activeSystemPrompt}\n\nThe current date and time is ${new Date().toString()}.`
 
   if (relevantMemories.length > 0) {
     systemPrompt += `\n\nThings you remember about the user (only mention if relevant):\n${relevantMemories.map((m) => `- ${m.content}`).join('\n')}`

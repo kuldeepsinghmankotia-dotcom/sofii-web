@@ -1,7 +1,8 @@
 import type { ChatMessage } from '@/lib/db/messages'
 
-// Assistant replies are already markdown (see SYSTEM_PROMPT in
-// src/lib/groq/client.ts), so they're inlined as-is rather than re-escaped
+// Assistant replies are already markdown (see the system prompt, now
+// DB-backed via src/lib/db/system-prompt.ts), so they're inlined as-is
+// rather than re-escaped
 // — the exported file reads exactly like the in-app rendering. User
 // messages are plain text, wrapped as a blockquote to visually separate
 // turns without needing any markdown escaping of their own.

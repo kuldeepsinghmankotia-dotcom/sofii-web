@@ -14,6 +14,7 @@ import {
   Pencil,
   Plus,
   Search,
+  ShieldCheck,
   Sparkles,
   Trash2,
   X
@@ -51,6 +52,8 @@ const SECONDARY_LINKS = [
   { href: '/calendar', label: 'Calendar', icon: Calendar }
 ]
 
+const ADMIN_LINK = { href: '/admin/system-prompt', label: 'System Prompt', icon: ShieldCheck }
+
 type Group = { label: string; items: ConversationSummary[] }
 
 function groupByRecency(items: ConversationSummary[]): Group[] {
@@ -82,11 +85,13 @@ function groupByRecency(items: ConversationSummary[]): Group[] {
 export default function Sidebar({
   initialConversations,
   userEmail,
+  isAdmin,
   open,
   onClose
 }: {
   initialConversations: ConversationSummary[]
   userEmail: string
+  isAdmin: boolean
   open: boolean
   onClose: () => void
 }) {
@@ -375,7 +380,7 @@ export default function Sidebar({
         </nav>
 
         <div className="shrink-0 border-t border-[var(--border)] px-2 py-2">
-          {SECONDARY_LINKS.map((link) => (
+          {(isAdmin ? [...SECONDARY_LINKS, ADMIN_LINK] : SECONDARY_LINKS).map((link) => (
             <Link
               key={link.href}
               href={link.href}
