@@ -44,9 +44,6 @@ Key decisions already confirmed directly with the user (do not re-litigate):
   trade-off; needs ~8GB+ unified memory, comfortable on most Apple
   Silicon Macs), `moondream:1.8b` as a safe fallback on lower-memory
   machines, `llama3.2-vision:11b` as a heavier middle option.
-- **Admin bootstrap**: a migration seeds `role = 'admin'` for
-  `amit21aim@gmail.com` directly — confirmed acceptable for this
-  single-admin personal app.
 - **PDF stays on the existing TypeScript path** — the Python service
   handles only the new formats (docx/txt/html/csv/image). Both paths write
   to the same `document_chunks` schema and use the same embedding
@@ -58,24 +55,17 @@ Key decisions already confirmed directly with the user (do not re-litigate):
   cron is already at its one-per-day limit from this session's earlier
   work; a stuck-job timeout is handled lazily on page load instead).
 
-**Before starting this**: there's a small amount of already-approved,
-in-flight work from the previous session plan (shareable read-only
-conversation links) that's implemented but not yet fully wired up in the
-UI or committed — finish that first (it's minutes of work, already 90%
-done: migration applied, backend routes written, just needs the dropdown
-UI + verification), then start this plan's Phase 1.
-
-## High-level architecture
+## High-level architecture (end state, after all phases)
 
 ```
 Browser ── existing Supabase-cookie auth
    │
    ▼
 Next.js (Vercel) ── existing chat/doc code, unchanged
-   ├─ /api/chat ────────────────► Groq/Gemini (existing; DB-backed system prompt now)
-   ├─ /api/ingest (NEW proxy, authenticated) ──HTTPS+shared secret──► Python service (user's Mac)
-   ├─ /api/ingest/status/[jobId] (NEW, polled)
-   └─ /admin/system-prompt (NEW, role-gated)
+   ├─ /api/chat ────────────────► Groq/Gemini (existing; DB-backed system prompt — Phase 1, done)
+   ├─ /api/ingest (proxy, authenticated) ──HTTPS+shared secret──► Python service (user's Mac)
+   ├─ /api/ingest/status/[jobId] (polled)
+   └─ /admin/system-prompt (role-gated — Phase 1, done)
              │
              ▼
       system_prompts table ◄──── read directly by Python service too
@@ -88,251 +78,280 @@ Next.js (Vercel) ── existing chat/doc code, unchanged
      FastAPI + LangGraph + Redis (local Docker) + Ollama (localhost-only, never exposed directly)
 ```
 
-## New Python service: `services/ingestion-agent/`
+Every table gets this project's confirmed-necessary explicit
+`grant ... to authenticated` / `grant all ... to service_role` treatment in
+the same migration that creates/alters it — RLS alone isn't enough here
+(hit and fixed live earlier this session). Every phase below repeats that
+reminder where it applies rather than assuming it's remembered.
 
-New top-level directory (sibling to the Next.js app, outside `src/` — a
-separate language/runtime, never pulled into the Next.js build):
+---
 
-```
-services/ingestion-agent/
-├── pyproject.toml, README.md, .env.example
-├── app/
-│   ├── main.py, config.py, auth.py       # FastAPI app, pydantic-settings, shared-secret verification
-│   ├── routers/ingest.py, health.py
-│   ├── graph/
-│   │   ├── state.py                       # Pydantic IngestionState (storage path, not raw bytes — see below)
-│   │   ├── build.py                       # StateGraph, conditional routing by format
-│   │   ├── nodes/
-│   │   │   ├── router.py                  # classify format from mime type + magic-byte sniff
-│   │   │   ├── extract_text.py            # .txt
-│   │   │   ├── extract_html.py            # .html (BeautifulSoup4)
-│   │   │   ├── extract_docx.py            # .docx (python-docx)
-│   │   │   ├── extract_csv.py             # .csv/tabular (pandas)
-│   │   │   ├── ocr_ensemble.py            # Gemini + Ollama, cross-validated
-│   │   │   ├── chunk.py                   # format-aware (prose: 1500/200 chars, matches existing TS chunker;
-│   │   │   │                              #   tabular: row-group + markdown-table rendering)
-│   │   │   ├── embed.py                   # Gemini gemini-embedding-001, 768-dim — same as existing TS path
-│   │   │   ├── validate_output.py         # final Pydantic gate before persistence
-│   │   │   └── persist.py                 # writes documents/document_chunks/ingestion_jobs
-│   │   └── checkpointer.py                # langgraph-checkpoint-redis AsyncRedisSaver, thread_id=job_id
-│   ├── validation/models.py, cross_validate.py
-│   ├── clients/supabase_client.py, redis_client.py, gemini_client.py, ollama_client.py
-│   └── memory/long_term.py                # reads/writes the EXISTING `memories` table (shared with TS chat)
-└── tests/  # pytest + pytest-asyncio + respx (httpx mocking)
-```
+## Phase 1 — Admin-editable system prompt ✅ done
 
-**Dependencies**: `fastapi`+`uvicorn`, `langgraph`, `langgraph-checkpoint-redis`,
-`pydantic` v2 + `pydantic-settings`, `supabase` (supabase-py, service-role
-key — same RPC-based access pattern as the TS app), `redis` (asyncio),
-`httpx` (async, for Gemini REST + tunneled Ollama), `python-docx`,
-`beautifulsoup4`+`lxml`, `pandas`, `python-multipart`, `pytest`.
+Pure Next.js, no Python yet. Ships as a behavioral no-op on day one (the
+seed value matches the prior hardcoded prompt exactly).
 
-### State design: storage path, not raw bytes
+**Built:**
+- Migration: `profiles` gets a `role text default 'user' check (role in
+  ('user','admin'))` column; a `before update` trigger
+  (`prevent_self_role_escalation`) blocks a non-admin from setting their
+  own `role` via the existing `profiles_update_own` policy (RLS is
+  row-level, not column-level); `system_prompts` table (id, key, content,
+  is_active, updated_by, timestamps), RLS `select` open to `authenticated`,
+  `insert`/`update` restricted to `profiles.role = 'admin'` rows; explicit
+  grants per this project's convention.
+- `src/lib/db/system-prompt.ts`: `getActiveSystemPrompt(supabase)` — no
+  caching layer (this project's `next.config.ts` doesn't have Cache
+  Components enabled; a single indexed-row read is cheap enough next to
+  the LLM call that follows it — not worth the complexity).
+- `src/lib/db/profiles.ts`: `getOwnRole(supabase, userId)`.
+- `src/app/api/chat/route.ts`: swapped the hardcoded `SYSTEM_PROMPT`
+  import for `await getActiveSystemPrompt(supabase)`; the dead constant
+  was removed from `src/lib/groq/client.ts` rather than left unused.
+- `src/app/(app)/admin/system-prompt/page.tsx` + `system-prompt-form.tsx`
+  (role-gated Server Component + client form), `src/app/api/admin/system-prompt/route.ts`
+  (`GET`/`PATCH`, re-checks role server-side — never trusts the page
+  redirect alone).
+- Sidebar: conditional "System Prompt" link, admin-only
+  (`src/app/(app)/sidebar.tsx`, `isAdmin` threaded through
+  `(app)/layout.tsx` → `app-shell.tsx` → `sidebar.tsx`).
+- Admin bootstrap: originally `amit21aim@gmail.com` via a one-time seed,
+  later changed (see Status note above) to `kuldeepsinghmankotia@gmail.com`
+  via a durable trigger-based grant in `handle_new_user()`.
 
-`IngestionState` carries `storage_path`/`filename`/`mime_type`/`user_id`,
-never raw file bytes — LangGraph's Redis checkpointer serializes the full
-state on every node transition (that IS the short-term/node memory), so a
-multi-MB file in state would bloat every checkpoint. The Next.js proxy
-uploads to a new private `document-uploads` Storage bucket first (mirrors
-the existing `chat-images` bucket's per-user-folder RLS pattern); nodes
-fetch bytes from Storage only when they need them.
+**Verified:** non-admin redirected from `/admin/system-prompt` and never
+sees the sidebar link; promoted a test account to admin (service-role
+update, confirms the trigger correctly allows service-role writes); page
+loads, edits persist; **an edited prompt instructing replies to start with
+a literal marker actually changed a live chat reply** — proves the whole
+path, not just that a DB row updated. Also caught and fixed a real bug
+during this verification: the "unsaved changes" indicator compared against
+the initial page-load value forever and never cleared after a successful
+save.
 
-### Graph flow
+---
 
-```
-START → router_node → [conditional edge on format]
-  txt/html/docx/csv → respective extract_*_node
-  image             → ocr_ensemble_node (Gemini + Ollama, asyncio.gather)
-  pdf               → reject_node (clear error pointing at the existing /documents PDF upload)
-→ chunk_node → embed_node → validate_output_node → persist_node → END
-(any node exception) → failed_node → ingestion_jobs.status='failed', error_message set
-```
+## Phase 2 — Python service skeleton, reachable, no real ingestion
 
-### Cross-validation (`app/validation/cross_validate.py`) — reusable pattern
+**Build:**
+- `services/ingestion-agent/` (new top-level directory, sibling to the
+  Next.js app, outside `src/` — separate language/runtime, never pulled
+  into the Next.js build): `pyproject.toml`, `README.md`, `.env.example`,
+  `app/main.py` (FastAPI app), `app/config.py` (`pydantic-settings`),
+  `app/auth.py` (shared-secret verification), `app/routers/health.py`
+  (`GET /health`).
+- Dependencies for this phase: `fastapi`, `uvicorn`, `pydantic` v2,
+  `pydantic-settings`, `httpx`, `pytest`.
+- **Deployment** (colocated on the user's Mac, per the confirmed
+  decision): `uvicorn app.main:app --port 8000` running locally;
+  `cloudflared tunnel` exposing **only** port 8000 publicly. New env vars
+  `INGEST_SERVICE_URL`, `INGEST_SERVICE_SECRET` (set identically in
+  Vercel's env and the Python service's `.env`).
+- `src/app/api/ingest/route.ts` (new): for now, just proxies to the Python
+  service's `/health` with the shared secret — proves the whole chain
+  (browser → Vercel → tunnel → home machine) works before any real graph
+  exists.
 
-```python
-class SourceResult(BaseModel):
-    source: str; text: str | None; error: str | None = None; latency_ms: int
+**Verify:** `curl $INGEST_SERVICE_URL/health` succeeds from an unrelated
+network (e.g. a phone hotspot, not the same LAN as the Mac); a signed-in
+browser session hitting a temporary test button calling `/api/ingest` gets
+a 200 with the Python service's health payload; an unauthenticated direct
+call to the Python service (no bearer token) is rejected.
 
-class CrossValidationResult(BaseModel):
-    agreement_score: float
-    status: Literal["agree","partial_disagreement","disagreement","single_source"]
-    reconciled_text: str
-    sources: list[SourceResult]
-    flagged_for_review: bool
-```
+---
 
-`cross_validate(sources, agree_threshold=0.90, partial_threshold=0.70)`
-computes similarity (starts as `difflib.SequenceMatcher`, no new
-dependency; swappable later for embedding-cosine similarity) between two
-sources' text. `agree` → picks the more complete text, not flagged.
-`partial_disagreement`/`disagreement` → Gemini's result wins but
-**flagged**, both sources retained in `metadata`. Only one source
-available (e.g. the Mac/tunnel is offline) → `single_source`, always
-flagged. **Disagreements are never silently resolved** — `status` and
-`flagged_for_review` persist into `document_chunks.metadata` so the UI can
-surface "OCR sources disagreed" rather than quietly picking one.
+## Phase 3 — Redis + router-only graph
 
-### Pydantic validation — two levels
+**Build:**
+- Redis: local Docker container (`docker run -d -p 6379:6379
+  redis:7-alpine`), reached at `127.0.0.1:6379` — free, zero added
+  latency, nothing new exposed through the tunnel.
+- Add `langgraph`, `langgraph-checkpoint-redis`, `redis` (asyncio) to
+  dependencies.
+- `app/graph/state.py`: Pydantic `IngestionState` — carries
+  `storage_path`/`filename`/`mime_type`/`user_id`, **never raw file
+  bytes** (the Redis checkpointer serializes the full state on every node
+  transition — that IS the short-term/node memory — so a multi-MB file in
+  state would bloat every checkpoint write).
+- `app/graph/build.py`: `StateGraph` with just `router_node` for now.
+- `app/graph/nodes/router.py`: classifies format from mime type +
+  magic-byte sniff, echoes it back (no real extraction yet).
+- `app/graph/checkpointer.py`: `langgraph-checkpoint-redis`'s
+  `AsyncRedisSaver`, keyed by `job_id` as `thread_id`.
 
-- **Node level**: each extractor returns a small Pydantic model (e.g.
-  `ExtractedTextResult`) that validates before the node returns — an empty
-  extraction raises, routing to `failed_node`, same spirit as the existing
-  TS upload route's "delete the document rather than leave an empty,
-  unsearchable one behind" guard.
-- **Final output**: `validate_output_node` runs a `IngestionResult`
-  Pydantic model (`chunks: list[ChunkCandidate] = Field(min_length=1)`,
-  a validator checking every chunk's embedding is exactly 768 floats) over
-  the *entire* accumulated state before `persist_node` — nothing malformed
-  ever reaches the database.
+**Verify:** unit tests for `router_node` covering each mime type; run the
+graph end to end for a test job and confirm Redis actually holds
+checkpoint state afterward (`redis-cli KEYS '*'` shows entries).
 
-### Memory
+---
 
-- **Short-term/node**: `langgraph-checkpoint-redis`'s `AsyncRedisSaver`,
-  keyed by `job_id` as `thread_id` — free resumability if the process
-  restarts mid-job (useful since Ollama calls can be slow/flaky), plus a
-  lightweight `app/memory/short_term.py` cache keyed
-  `ocr:{sha256(bytes)}:{model}` (TTL 1h) so retries don't re-pay a slow
-  local-Ollama inference call.
-- **Long-term**: reuses the **existing** `memories` table (same one
-  `src/lib/db/memories.ts`/`src/lib/memory/extract.ts` already use) via
-  `supabase-py` — durable facts extracted during ingestion become
-  memories the existing chat retrieval (`rankMemoriesByRelevance`) already
-  surfaces. No new memory storage mechanism.
-- `document_chunks` itself is the long-term store for document content —
-  no separate vector store.
+## Phase 4 — Simple-format ingestion end to end (.txt/.html/.csv, no OCR)
 
-## Deployment: colocated on the user's Mac
+The first phase that actually persists something and is user-visible.
 
-`ollama serve` (port 11434, localhost-only, never exposed) +
-`uvicorn app.main:app --port 8000` both run locally; `cloudflared tunnel`
-exposes **only** port 8000 publicly. Redis runs as a local Docker
-container (`docker run -d -p 6379:6379 redis:7-alpine`), reached at
-`127.0.0.1:6379` — free, zero added latency, nothing new to expose. The
-Next.js proxy calls the tunnel's public HTTPS URL with a shared-secret
-bearer token (new env vars `INGEST_SERVICE_URL`, `INGEST_SERVICE_SECRET`,
-set identically on both sides).
-
-## Schema changes (Supabase migrations)
-
-Every new/altered table gets this project's confirmed-necessary explicit
-`grant ... to authenticated` / `grant all ... to service_role` treatment
-in the same migration — RLS alone isn't enough here (hit and fixed live
-earlier this session).
-
-- **`multi_modal_documents`**: `documents` gets `source_type`,
+**Build:**
+- Migration `multi_modal_documents`: `documents` gets `source_type`,
   `ingested_by` ('typescript'|'python'), `metadata jsonb`.
-  `document_chunks` gets `modality`, `metadata jsonb` (houses OCR
-  cross-validation info, tabular row ranges, etc. — jsonb rather than new
-  tables, avoiding schema explosion per modality). `match_document_chunks`
-  RPC extended with an optional `modality_filter` param, backward-compatible.
-- **`ingestion_jobs`** (new table): id, user_id, document_id (nullable),
-  filename, status (pending/processing/done/failed), error_message,
-  timestamps. RLS owner-scoped; `service_role` gets full access (Python
-  writes via service-role key, same trust model as the digest cron's
-  `createAdminClient()`).
-- **`document_uploads_storage`**: new private `document-uploads` bucket,
-  same per-user-folder policy pattern as `chat-images`.
-- **`system_prompts`** (new table): id, key (unique, default 'default'),
-  content, is_active, updated_by, timestamps. Seeded with the current
-  hardcoded `SYSTEM_PROMPT` string so day one is behaviorally a no-op.
-  RLS: `select` for `authenticated`; `insert`/`update` restricted to
-  `profiles.role = 'admin'` rows.
-- **`profiles_role`**: `profiles` gets `role text default 'user' check
-  (role in ('user','admin'))`, seeded `role='admin' where email =
-  'amit21aim@gmail.com'`. A plain user must not be able to self-promote
-  via the existing `profiles_update_own` policy — add a `before update`
-  trigger that ignores/rejects changes to `role` from non-admin callers
-  (RLS is row-level, not column-level, so this needs the trigger for
-  real defense-in-depth).
-
-## Next.js-side integration
-
-- **`src/app/api/ingest/route.ts`** (new): auth check → validate file →
-  upload to `document-uploads` → insert `ingestion_jobs` row → POST to the
-  Python service's tunnel URL with the shared secret → return `{ jobId }`
-  (202). The Python service never sees a Supabase session — it trusts the
-  shared secret and is handed `user_id` explicitly.
-- **`src/app/api/ingest/status/[jobId]/route.ts`** (new): RLS-scoped
-  status poll.
-- **`src/app/(app)/documents/document-list.tsx`** (extended, not a new
-  page): accept `.docx,.txt,.html,.csv,image/*` alongside the existing
-  PDF path (PDF keeps calling the existing `/api/documents/upload`
-  unchanged); non-PDF files call `/api/ingest` then poll status every
-  ~2s (`queueMicrotask`-wrapped `setState`, matching this project's
+  `document_chunks` gets `modality`, `metadata jsonb` (houses per-modality
+  extras like tabular row ranges — jsonb rather than new tables per
+  modality). `match_document_chunks` RPC extended with an optional
+  `modality_filter` param, backward-compatible with existing TS callers.
+- Migration `ingestion_jobs` (new table): id, user_id, document_id
+  (nullable), filename, status (pending/processing/done/failed),
+  error_message, timestamps. RLS owner-scoped; `service_role` gets full
+  access (Python writes via service-role key, same trust model as the
+  digest cron's `createAdminClient()`).
+- Migration `document_uploads_storage`: new **private** `document-uploads`
+  bucket, same per-user-folder policy pattern as the existing
+  `chat-images` bucket.
+- Python: `app/graph/nodes/extract_text.py` (.txt), `extract_html.py`
+  (BeautifulSoup4), `extract_csv.py` (pandas), `chunk.py` (prose:
+  1500/200 chars, matching the existing TS chunker's sizing; tabular:
+  row-group + markdown-table rendering), `embed.py` (Gemini
+  `gemini-embedding-001`, 768-dim — same model/dims as the existing TS
+  path, so retrieval is unified regardless of which pipeline created a
+  chunk), `validate_output.py`, `persist.py`. Add `beautifulsoup4`+`lxml`,
+  `pandas`, `python-multipart`, `supabase` (supabase-py) to dependencies.
+- **Node-level Pydantic validation**: each extractor returns a small model
+  (e.g. `ExtractedTextResult`) that validates before the node returns — an
+  empty extraction raises, routing to a `failed_node`, same spirit as the
+  existing TS upload route's "delete the document rather than leave an
+  empty, unsearchable one behind" guard.
+- **Final-output Pydantic validation**: `validate_output_node` runs an
+  `IngestionResult` model (`chunks: list[ChunkCandidate] =
+  Field(min_length=1)`, a validator checking every chunk's embedding is
+  exactly 768 floats) over the *entire* accumulated state before
+  `persist_node` — nothing malformed ever reaches the database.
+- `src/app/api/ingest/route.ts`: fully wired now — auth check, file
+  validation, upload to `document-uploads`, `ingestion_jobs` row insert,
+  real POST to the Python service. `src/app/api/ingest/status/[jobId]/route.ts`
+  (new): RLS-scoped status poll.
+- `src/app/(app)/documents/document-list.tsx` (extended, not a new page):
+  accepts `.txt,.html,.csv` alongside the existing PDF path (PDF keeps
+  calling the existing `/api/documents/upload`, completely unchanged);
+  non-PDF files call `/api/ingest` then poll status every ~2s
+  (`queueMicrotask`-wrapped `setState`, matching this project's
   established `react-hooks/set-state-in-effect` workaround — copy the
-  exact pattern from `reminder-poller.tsx`); show a per-row "Processing…"
-  badge and a "flagged for review" chip when `document_chunks.metadata`
-  shows OCR disagreement.
-- **`src/app/(app)/admin/system-prompt/page.tsx`** (new): Server
-  Component, `getUser()` → check `profiles.role === 'admin'` → redirect
-  if not (same self-contained-auth-check style as `(app)/layout.tsx`).
-- **`src/app/api/admin/system-prompt/route.ts`** (new): `GET`/`PATCH`,
-  re-checks admin role server-side (never trust the page redirect alone).
-- **`src/lib/db/system-prompt.ts`** (new): `getActiveSystemPrompt(supabase)`
-  reads the DB row, falls back to a literal constant if none exists.
-  Cached via Next.js's `'use cache'` + `cacheTag('system-prompt')`; the
-  admin `PATCH` route calls `updateTag('system-prompt')` after saving so
-  edits take effect on the next chat request with no deploy/TTL wait.
-- **`src/app/api/chat/route.ts`** (modified): swaps the hardcoded
-  `SYSTEM_PROMPT` import for `await getActiveSystemPrompt(supabase)` —
-  everything else (date-appending, memory/document injection) unchanged.
-  The Python service reads the same table directly via its own
-  service-role client when it needs a prompt.
+  exact pattern from `reminder-poller.tsx`); per-row "Processing…" badge.
 
-## Phased build order
+**Verify:** upload a real `.txt`, `.html`, and `.csv` fixture through the
+actual UI; confirm `documents`/`document_chunks` rows land with correct
+`source_type`/`modality`; ask a chat question whose answer only exists in
+the uploaded `.csv` and confirm the assistant answers it correctly (proves
+retrieval — the existing `matchDocumentChunks` call — works unmodified
+against Python-authored chunks); confirm a second test user can't see the
+first user's `ingestion_jobs` row or resulting `document_chunks` (RLS
+check, attempted as `authenticated` role, not just reading policy
+definitions).
 
-Each phase independently shippable/verifiable, same pattern as this
-session's other features.
+---
 
-1. **Admin-editable system prompt** (pure Next.js, no Python yet) —
-   migrations, admin page/route, `SYSTEM_PROMPT` swap. Verify: bootstrap
-   admin confirmed via query; edit prompt, send a chat message, confirm
-   behavior changed (e.g. temporarily force a distinctive response
-   pattern); confirm a non-admin account gets redirected.
-2. **Python service skeleton, reachable, no real ingestion** — FastAPI
-   scaffold, `/health`, shared-secret auth, Cloudflare Tunnel live,
-   `/api/ingest` proxies to `/health` only. Verify: `curl` the tunnel URL
-   from an unrelated network succeeds; an unauthenticated direct call is
-   rejected.
-3. **Redis + router-only graph** — checkpointer wired, router node
-   classifies and echoes format. Verify: unit tests per mime type; confirm
-   Redis actually holds checkpoint state after a run.
-4. **Simple-format ingestion end to end** (.txt/.html/.csv, no OCR) — full
-   graph through `persist_node`, `ingestion_jobs`/storage/schema
-   migrations, UI wiring + polling. Verify: real file uploaded through the
-   actual UI for each format; a chat question answerable only from
-   uploaded content gets answered correctly (proves retrieval works
-   unmodified against Python-authored chunks); second test user can't see
-   the first user's rows (RLS check).
-5. **.docx support** — one more extractor node. Verify: same as phase 4.
-6. **OCR ensemble** — Gemini+Ollama, cross-validation, `ollama pull
-   qwen2.5vl:7b`. Verify: clean image gives `status='agree'`,
-   `agreement_score` >0.9; deliberately stopping the tunnel/Ollama mid-test
-   confirms graceful `single_source` degradation, not a hard failure; UI
-   shows the "flagged for review" chip.
-7. **Long-term memory bridge** — ingestion writes durable facts to the
-   shared `memories` table (check `20260807125335_memory_source.sql` for
-   the existing `source` enum shape before adding a new value). Verify:
-   ingest a document with an obvious fact, confirm it surfaces in a later,
-   unrelated chat via existing memory retrieval.
-8. **Hardening pass** — full pytest suite green; explicit RLS+grants audit
-   per new table (attempt operations as `authenticated`, not just service
-   role); document real OCR latency; lazy stuck-job timeout on the
-   documents page load (no new cron — Hobby plan's is already spoken for).
+## Phase 5 — .docx support
 
-## Verification (cutting across phases)
+**Build:** `app/graph/nodes/extract_docx.py` (python-docx), wired into the
+router's conditional edge. Add `python-docx` to dependencies.
 
-- Python unit tests per node + `cross_validate` against synthetic
-  agree/disagree/single-source inputs + final-validator rejection of
-  malformed chunk lists.
-- Real end-to-end upload through the actual browser UI per format, plus a
-  chat question proving retrieval.
-- Admin prompt change proven via an observable behavioral difference in a
-  chat reply, not just a DB row update (proves cache invalidation works).
-- RLS/grants: attempt every new table's operations as `authenticated`
-  role explicitly, not just reading policy definitions.
-- Degraded-mode test: Ollama/tunnel deliberately offline mid-development
-  to exercise the single-source fallback path for real.
+**Verify:** upload a real multi-paragraph `.docx` through the actual UI,
+confirm extraction + retrieval exactly as in Phase 4's verification.
+
+---
+
+## Phase 6 — OCR ensemble (Gemini + Ollama) with cross-validation
+
+**Build:**
+- `app/validation/models.py` + `cross_validate.py` — the reusable
+  multi-source agreement-check pattern:
+  ```python
+  class SourceResult(BaseModel):
+      source: str; text: str | None; error: str | None = None; latency_ms: int
+
+  class CrossValidationResult(BaseModel):
+      agreement_score: float
+      status: Literal["agree","partial_disagreement","disagreement","single_source"]
+      reconciled_text: str
+      sources: list[SourceResult]
+      flagged_for_review: bool
+  ```
+  `cross_validate(sources, agree_threshold=0.90, partial_threshold=0.70)`
+  computes similarity (starts as `difflib.SequenceMatcher`, no new
+  dependency; swappable later for embedding-cosine similarity) between two
+  sources' text. `agree` → picks the more complete text, not flagged.
+  `partial_disagreement`/`disagreement` → Gemini's result wins but
+  **flagged**, both sources retained. Only one source available (e.g. the
+  Mac/tunnel is offline) → `single_source`, always flagged.
+  **Disagreements are never silently resolved** — `status` and
+  `flagged_for_review` persist into `document_chunks.metadata` so the UI
+  can surface "OCR sources disagreed" rather than quietly picking one.
+- `app/graph/nodes/ocr_ensemble.py`: `asyncio.gather`s a Gemini vision call
+  (`app/clients/gemini_client.py`, reuses `GEMINI_API_KEY`) and an Ollama
+  vision call (`app/clients/ollama_client.py`, httpx to the tunneled
+  `127.0.0.1:11434` endpoint), feeds both into `cross_validate`.
+- `ollama pull qwen2.5vl:7b` on the Mac (see Context for fallback model
+  options); `OLLAMA_VISION_MODEL` env var makes this swappable without a
+  code change.
+- Short-term memory addition: `app/memory/short_term.py` — a Redis cache
+  keyed `ocr:{sha256(bytes)}:{model}` (TTL 1h) so retries within the same
+  session don't re-pay a slow local-Ollama inference call.
+- UI: `document-list.tsx` accepts `image/*` now too; surfaces a "flagged
+  for review" chip when `document_chunks.metadata` shows OCR disagreement.
+
+**Verify:** upload an image with clear printed text; confirm both
+`sources` entries populate in `document_chunks.metadata`,
+`agreement_score` >0.9, `status='agree'`; then deliberately stop the local
+`cloudflared`/Ollama process and confirm ingestion still completes with
+`status='single_source'` and `flagged_for_review=true` rather than failing
+outright; confirm the UI shows the chip.
+
+---
+
+## Phase 7 — Long-term memory bridge
+
+**Build:** `app/memory/long_term.py` — a node (or post-persist hook) that
+extracts a durable fact from ingested content (mirrors the existing TS
+`extractMemoryCandidate` fire-and-forget pattern in
+`src/lib/memory/extract.ts`) and writes to the **existing** `memories`
+table via `supabase-py` — no new memory storage mechanism. Check
+`supabase/migrations/20260807125335_memory_source.sql` for the existing
+`source` enum shape before adding a new value for ingestion-sourced
+memories.
+
+**Verify:** ingest a document containing an obvious durable fact, confirm
+a row appears in `memories` with a `source` distinguishing it from
+chat-extracted memories, and confirm that fact surfaces in a later,
+unrelated chat via the existing `rankMemoriesByRelevance` retrieval path.
+
+---
+
+## Phase 8 — Hardening pass
+
+**Build/verify (no new user-facing surface):**
+- Full `pytest` suite green (`services/ingestion-agent/tests/`), including
+  an end-to-end test against a real test-project Supabase schema.
+- RLS/grants audit: for every table touched by this plan, explicitly
+  attempt the operation as `authenticated` role (not service role) and
+  confirm it succeeds/fails as expected — this project's specific
+  "permission denied for table X" lesson, hit and fixed live earlier this
+  session, applies again here.
+- Document real OCR latency in `services/ingestion-agent/README.md` (the
+  async/polling UX choice from Phase 4 should be validated as necessary,
+  not just assumed).
+- Stuck-job cleanup: since no new cron slot is available (Hobby plan's is
+  already spoken for by the earlier digest-cron work), add a lazy check on
+  the documents page load (Server Component) that marks any
+  `ingestion_jobs` row stuck in `status='processing'` for over N minutes
+  as `failed` with a timeout message, rather than adding a cron.
+
+---
+
+## Cross-cutting verification checklist
+
+Applies at every phase, not just the phase that introduces something:
+
 - `npx tsc --noEmit`, lint, `npm run build` clean on the TS side; `pytest`
-  clean on the Python side, at every phase.
+  clean on the Python side.
+- Every new/altered table: explicit `grant` statements in the same
+  migration, RLS policy attempted as `authenticated` role for real (not
+  just read from `pg_policies`).
+- Any user-facing change gets a real browser walkthrough, not just a
+  passing test — this project's established standard (see Phase 1's
+  verification for the bar to match).
