@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono, Orbitron } from 'next/font/google'
-import { Toaster } from 'sonner'
+import { ThemeProvider } from 'next-themes'
+import AppToaster from './app-toaster'
 import './globals.css'
 
 const geistSans = Geist({
@@ -50,25 +51,26 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {
   return (
+    // suppressHydrationWarning on <html> is required by next-themes: it
+    // sets the data-theme attribute via an inline script that runs before
+    // React hydrates (so there's no flash of the wrong theme), which would
+    // otherwise be flagged as a server/client mismatch even though it's
+    // intentional.
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} ${orbitron.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
-        {children}
-        <Toaster
-          theme="dark"
-          position="bottom-center"
-          toastOptions={{
-            className: 'glass',
-            style: {
-              background: 'var(--bg-glass)',
-              border: '1px solid var(--border-strong)',
-              color: 'var(--text)',
-              borderRadius: 'var(--radius-lg)'
-            }
-          }}
-        />
+        {/* Dark is the app's primary identity — defaultTheme="dark" (not
+        "system") so nobody's OS light-mode preference silently changes
+        Sofii's look on first visit; light is an explicit opt-in via the
+        toggle, not a default. enableSystem is off to match — this is a
+        2-way toggle, not a 3-way light/dark/system picker. */}
+        <ThemeProvider attribute="data-theme" defaultTheme="dark" enableSystem={false}>
+          {children}
+          <AppToaster />
+        </ThemeProvider>
       </body>
     </html>
   )

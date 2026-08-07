@@ -73,7 +73,7 @@ export function ModelPicker({
             <DropdownMenu.Item
               key={key}
               onSelect={() => onChange(key)}
-              className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-white/[0.06] data-[highlighted]:text-[var(--text)]"
+              className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-[var(--surface-active)] data-[highlighted]:text-[var(--text)]"
             >
               {key === 'groq' ? <Zap size={14} /> : <Sparkles size={14} />}
               <span className="flex-1">

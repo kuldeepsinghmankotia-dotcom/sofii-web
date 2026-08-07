@@ -909,7 +909,7 @@ export default function ChatWindow({
               })
             }
             aria-label={speakEnabled ? 'Turn off spoken replies' : 'Turn on spoken replies'}
-            className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text)] sm:p-1"
+            className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-hover-strong)] hover:text-[var(--text)] sm:p-1"
           >
             {speakEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}
           </motion.button>
@@ -920,7 +920,7 @@ export default function ChatWindow({
               whileTap={reducedMotion ? undefined : { scale: 0.9 }}
               aria-label="More conversation options"
               title="More options"
-              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text)] sm:p-1"
+              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-hover-strong)] hover:text-[var(--text)] sm:p-1"
             >
               <MoreHorizontal size={17} />
             </motion.button>
@@ -933,7 +933,7 @@ export default function ChatWindow({
             >
               <DropdownMenu.Item
                 onSelect={() => downloadConversationAsMarkdown(messages, title)}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-white/[0.06] data-[highlighted]:text-[var(--text)]"
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-[var(--surface-active)] data-[highlighted]:text-[var(--text)]"
               >
                 <Download size={14} />
                 Export as Markdown
@@ -942,7 +942,7 @@ export default function ChatWindow({
                 <>
                   <DropdownMenu.Item
                     onSelect={() => void handleCopyShareLink()}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-white/[0.06] data-[highlighted]:text-[var(--text)]"
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-[var(--surface-active)] data-[highlighted]:text-[var(--text)]"
                   >
                     <Link2 size={14} />
                     Copy share link
@@ -960,7 +960,7 @@ export default function ChatWindow({
                 <DropdownMenu.Item
                   disabled={sharing}
                   onSelect={() => void handleShareConversation()}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-white/[0.06] data-[highlighted]:text-[var(--text)] data-[disabled]:opacity-60"
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-[var(--surface-active)] data-[highlighted]:text-[var(--text)] data-[disabled]:opacity-60"
                 >
                   <Link2 size={14} />
                   {sharing ? 'Sharing…' : 'Share conversation'}
@@ -1006,7 +1006,7 @@ export default function ChatWindow({
                         />
                       )}
                       {editingId === m.id ? (
-                        <div className="rounded-2xl rounded-tr-sm border border-[var(--border-strong)] bg-black/30 p-2">
+                        <div className="rounded-2xl rounded-tr-sm border border-[var(--border-strong)] bg-[var(--surface-input-strong)] p-2">
                           <textarea
                             autoFocus
                             value={editValue}
@@ -1025,7 +1025,7 @@ export default function ChatWindow({
                           <div className="mt-1 flex justify-end gap-2 text-xs">
                             <button
                               onClick={cancelEdit}
-                              className="rounded-md px-2 py-1 text-[var(--text-muted)] hover:bg-white/10"
+                              className="rounded-md px-2 py-1 text-[var(--text-muted)] hover:bg-[var(--surface-button-hover)]"
                             >
                               Cancel
                             </button>
@@ -1056,7 +1056,7 @@ export default function ChatWindow({
                               <button
                                 onClick={() => startEdit(m)}
                                 aria-label="Edit message"
-                                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+                                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-button-hover)] hover:text-[var(--text)]"
                               >
                                 <Pencil size={13} />
                                 Edit
@@ -1068,7 +1068,7 @@ export default function ChatWindow({
                     </div>
                     <div
                       aria-hidden="true"
-                      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--border-strong)] bg-white/5 text-[var(--text-muted)]"
+                      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-hover-strong)] text-[var(--text-muted)]"
                     >
                       <User size={14} />
                     </div>
@@ -1114,7 +1114,7 @@ export default function ChatWindow({
                             <button
                               onClick={() => void regenerate(m.id)}
                               aria-label="Regenerate response"
-                              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+                              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-button-hover)] hover:text-[var(--text)]"
                             >
                               <RotateCcw size={13} />
                               Regenerate
@@ -1224,14 +1224,14 @@ export default function ChatWindow({
         )}
       </AnimatePresence>
 
-      <div className="accent-ring mx-auto mt-4 flex w-full max-w-3xl items-end gap-2 rounded-2xl border border-[var(--border)] bg-white/[0.03] p-2">
+      <div className="accent-ring mx-auto mt-4 flex w-full max-w-3xl items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-subtle)] p-2">
         <Tooltip label="Start recording">
           <motion.button
             whileTap={reducedMotion ? undefined : { scale: 0.9 }}
             onClick={toggleRecording}
             disabled={isTranscribing}
             aria-label="Start voice recording"
-            className="relative rounded-xl px-3 py-2.5 hover:bg-white/5 disabled:opacity-60"
+            className="relative rounded-xl px-3 py-2.5 hover:bg-[var(--surface-hover-strong)] disabled:opacity-60"
           >
             {isWakeListening && !reducedMotion && (
               <motion.span
@@ -1251,7 +1251,7 @@ export default function ChatWindow({
             onClick={() => cameraInputRef.current?.click()}
             disabled={uploadingImage}
             aria-label="Take a photo"
-            className="rounded-xl px-3 py-2.5 hover:bg-white/5 disabled:opacity-60 md:hidden"
+            className="rounded-xl px-3 py-2.5 hover:bg-[var(--surface-hover-strong)] disabled:opacity-60 md:hidden"
           >
             <Camera size={18} />
           </motion.button>
@@ -1270,7 +1270,7 @@ export default function ChatWindow({
             onClick={() => imageInputRef.current?.click()}
             disabled={uploadingImage}
             aria-label="Attach an image"
-            className="rounded-xl px-3 py-2.5 hover:bg-white/5 disabled:opacity-60"
+            className="rounded-xl px-3 py-2.5 hover:bg-[var(--surface-hover-strong)] disabled:opacity-60"
           >
             <ImagePlus size={18} />
           </motion.button>

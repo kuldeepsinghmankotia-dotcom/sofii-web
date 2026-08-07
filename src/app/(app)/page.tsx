@@ -72,7 +72,7 @@ export default function HomePage() {
         Ask anything, or pick a starting point below.
       </p>
 
-      <div className="accent-ring flex w-full max-w-xl items-center gap-2 rounded-2xl border border-[var(--border)] bg-white/[0.03] p-2">
+      <div className="accent-ring flex w-full max-w-xl items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-subtle)] p-2">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}

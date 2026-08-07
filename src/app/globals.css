@@ -28,6 +28,60 @@
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
   --shadow-glow-a: 0 0 20px rgba(34, 211, 238, 0.15);
   --shadow-glow-b: 0 0 24px rgba(139, 92, 246, 0.18);
+
+  /* Surface-overlay tokens — replace literal hover:bg-white/N,
+     bg-white/[0.0N], bg-black/20/30 utilities that were scattered across
+     components (invisible or wrong-tinted on a light background, since
+     they assumed a near-black page underneath). Named by role, not value,
+     so a component picks "the input-field tint" rather than "5% white".
+     Modal/fullscreen scrims (bg-black/60|70|90) are deliberately NOT
+     included here — a dark scrim over content reads correctly in both
+     themes, same convention most apps use. */
+  --surface-subtle: rgba(255, 255, 255, 0.03); /* input/card backgrounds */
+  --surface-hover: rgba(255, 255, 255, 0.04); /* nav-item hover */
+  --surface-hover-strong: rgba(255, 255, 255, 0.05); /* icon-button hover */
+  --surface-active: rgba(255, 255, 255, 0.06); /* selected/active state */
+  --surface-button-hover: rgba(255, 255, 255, 0.1); /* copy/sign-out button hover */
+  --surface-input: rgba(0, 0, 0, 0.2); /* search input fill */
+  --surface-input-strong: rgba(0, 0, 0, 0.3); /* edit/rename textarea fill */
+}
+
+/* Light theme — same cyan-to-violet identity, deepened for contrast
+   against a white ground instead of near-black (the dark theme's bright
+   #22d3ee/#8b5cf6 read as washed-out on white). Set via next-themes'
+   data-theme attribute on <html> (see src/app/layout.tsx) — every
+   component already reads these as var(--token), so nothing else needs a
+   light-specific class *if* it only ever used these tokens. It's the
+   literal white/black-opacity Tailwind utilities (hover:bg-white/5,
+   bg-black/60, etc.) sprinkled through components that don't route
+   through this and need fixing per-component — see the audit this phase
+   also did across sidebar.tsx, chat-window.tsx, model-picker.tsx, etc.
+   --radius-* and --accent-gradient are intentionally not redeclared here:
+   radius doesn't change with theme, and the gradient derives from
+   --accent-a/--accent-b so it updates automatically. */
+:root[data-theme='light'] {
+  --bg: #f7f8fc;
+  --bg-elevated: #ffffff;
+  --bg-glass: rgba(255, 255, 255, 0.75);
+  --border: rgba(99, 102, 241, 0.14);
+  --border-strong: rgba(99, 102, 241, 0.28);
+  --text: #14161f;
+  --text-muted: #5b6178;
+  --accent-a: #0891b2;
+  --accent-b: #7c3aed;
+  --danger: #dc2626;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.12);
+  --shadow-glow-a: 0 0 20px rgba(8, 145, 178, 0.12);
+  --shadow-glow-b: 0 0 24px rgba(124, 58, 237, 0.14);
+
+  --surface-subtle: rgba(15, 23, 42, 0.03);
+  --surface-hover: rgba(15, 23, 42, 0.04);
+  --surface-hover-strong: rgba(15, 23, 42, 0.05);
+  --surface-active: rgba(15, 23, 42, 0.06);
+  --surface-button-hover: rgba(15, 23, 42, 0.08);
+  --surface-input: rgba(15, 23, 42, 0.04);
+  --surface-input-strong: rgba(15, 23, 42, 0.06);
 }
 
 @theme inline {
@@ -53,6 +107,16 @@ body {
     var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+/* The dark theme's glow blobs read as ambient light against near-black;
+   at full strength on a white ground they'd read as a muddy smudge
+   instead, so light theme gets the same shape at a fraction of the
+   opacity — present, but a hint rather than a feature. */
+:root[data-theme='light'] body {
+  background:
+    radial-gradient(ellipse 60% 40% at 15% -10%, rgba(124, 58, 237, 0.06), transparent),
+    radial-gradient(ellipse 50% 35% at 100% 0%, rgba(8, 145, 178, 0.05), transparent),
+    var(--background);
 }
 
 /* Shared "futuristic" surface treatments, reused across the sidebar,

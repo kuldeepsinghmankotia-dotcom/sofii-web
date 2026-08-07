@@ -32,7 +32,7 @@ export default function SignInPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-black text-white">
+    <main className="flex min-h-screen items-center justify-center bg-[var(--bg)] text-[var(--text)]">
       <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4 p-8">
         <h1 className="text-2xl font-bold">Sign in to Sofii</h1>
 
@@ -42,7 +42,7 @@ export default function SignInPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email"
-          className="w-full rounded-lg bg-neutral-800 p-3 outline-none"
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
         />
 
         <input
@@ -51,22 +51,23 @@ export default function SignInPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Password"
-          className="w-full rounded-lg bg-neutral-800 p-3 outline-none"
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
         />
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
 
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-lg bg-blue-600 p-3 font-medium disabled:opacity-60"
+          className="w-full rounded-lg p-3 font-medium text-black disabled:opacity-60"
+          style={{ background: 'var(--accent-gradient)' }}
         >
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
 
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-[var(--text-muted)]">
           Don&apos;t have an account?{' '}
-          <Link href="/sign-up" className="text-blue-400 underline">
+          <Link href="/sign-up" className="text-[var(--accent-a)] underline">
             Sign up
           </Link>
         </p>

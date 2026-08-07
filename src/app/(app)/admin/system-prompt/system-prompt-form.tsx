@@ -42,7 +42,7 @@ export default function SystemPromptForm({ initialContent }: { initialContent: s
         value={content}
         onChange={(e) => setContent(e.target.value)}
         rows={14}
-        className="w-full resize-y rounded-lg border border-[var(--border)] bg-white/[0.03] p-3 font-mono text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+        className="w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-3 font-mono text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
       />
       <div className="mt-3 flex items-center justify-end gap-2">
         {dirty && <span className="text-xs text-[var(--text-muted)]">Unsaved changes</span>}

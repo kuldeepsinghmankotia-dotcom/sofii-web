@@ -89,7 +89,7 @@ export default function MemoryList({ initialMemories }: { initialMemories: Memor
             if (e.key === 'Enter') handleAdd()
           }}
           placeholder='Something to remember, e.g. "I prefer TypeScript over JavaScript"'
-          className="flex-1 rounded-lg border border-[var(--border)] bg-white/[0.03] p-3 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+          className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-3 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
         />
         <button
           onClick={handleAdd}
@@ -107,7 +107,7 @@ export default function MemoryList({ initialMemories }: { initialMemories: Memor
         {memories.map((memory) => (
           <div
             key={memory.id}
-            className="rounded-lg border border-[var(--border)] bg-white/[0.03] p-3"
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
           >
             <div className="flex items-center justify-between gap-3">
               {editingId === memory.id ? (
@@ -120,7 +120,7 @@ export default function MemoryList({ initialMemories }: { initialMemories: Memor
                     if (e.key === 'Enter') commitEditing()
                     if (e.key === 'Escape') setEditingId(null)
                   }}
-                  className="flex-1 rounded border border-[var(--border-strong)] bg-black/30 px-2 py-1 text-[var(--text)] outline-none"
+                  className="flex-1 rounded border border-[var(--border-strong)] bg-[var(--surface-input-strong)] px-2 py-1 text-[var(--text)] outline-none"
                 />
               ) : (
                 <span

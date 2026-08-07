@@ -22,6 +22,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import type { ConversationSummary } from '@/lib/db/conversations'
 import SignOutButton from './sign-out-button'
+import ThemeToggle from './theme-toggle'
 import { Tooltip } from './tooltip'
 import { MOBILE_QUERY, useIsMobile } from './use-is-mobile'
 
@@ -261,7 +262,7 @@ export default function Sidebar({
             <button
               onClick={onClose}
               aria-label="Close sidebar"
-              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text)] md:hidden"
+              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-hover-strong)] hover:text-[var(--text)] md:hidden"
             >
               <X size={16} />
             </button>
@@ -288,7 +289,7 @@ export default function Sidebar({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search chats"
-            className="w-full rounded-lg border border-[var(--border)] bg-black/20 py-1.5 pr-12 pl-8 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-input)] py-1.5 pr-12 pl-8 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
           />
           <kbd className="pointer-events-none absolute top-1/2 right-5 -translate-y-1/2 rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]">
             ⌘K
@@ -316,12 +317,12 @@ export default function Sidebar({
                         onChange={(e) => setRenameValue(e.target.value)}
                         onKeyDown={handleRenameKeyDown(c.id)}
                         onBlur={() => void commitRename(c.id)}
-                        className="w-full rounded-lg border border-[var(--border-strong)] bg-black/30 px-2 py-1.5 text-sm text-[var(--text)] outline-none"
+                        className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-input-strong)] px-2 py-1.5 text-sm text-[var(--text)] outline-none"
                       />
                     ) : (
                       <div
                         className={`group relative flex items-center gap-1 rounded-lg py-1.5 pr-1 pl-3 text-sm ${
-                          activeId === c.id ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'
+                          activeId === c.id ? 'bg-[var(--surface-active)]' : 'hover:bg-[var(--surface-hover)]'
                         }`}
                       >
                         {activeId === c.id && (
@@ -342,7 +343,7 @@ export default function Sidebar({
                           <DropdownMenu.Trigger asChild>
                             <button
                               aria-label={`More actions for ${c.title}`}
-                              className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-100 hover:bg-white/10 hover:text-[var(--text)] md:opacity-0 md:group-hover:opacity-100 data-[state=open]:opacity-100"
+                              className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-100 hover:bg-[var(--surface-button-hover)] hover:text-[var(--text)] md:opacity-0 md:group-hover:opacity-100 data-[state=open]:opacity-100"
                             >
                               <MoreHorizontal size={15} />
                             </button>
@@ -355,7 +356,7 @@ export default function Sidebar({
                             >
                               <DropdownMenu.Item
                                 onSelect={() => startRename(c)}
-                                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-white/[0.06] data-[highlighted]:text-[var(--text)]"
+                                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-[var(--surface-active)] data-[highlighted]:text-[var(--text)]"
                               >
                                 <Pencil size={14} />
                                 Rename
@@ -387,8 +388,8 @@ export default function Sidebar({
               onClick={onClose}
               className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${
                 pathname === link.href
-                  ? 'bg-white/[0.06] text-[var(--text)]'
-                  : 'text-[var(--text-muted)] hover:bg-white/[0.04] hover:text-[var(--text)]'
+                  ? 'bg-[var(--surface-active)] text-[var(--text)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
               }`}
             >
               <link.icon size={15} aria-hidden="true" />
@@ -399,7 +400,8 @@ export default function Sidebar({
 
         <div className="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] px-3 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] text-xs text-[var(--text-muted)]">
           <span className="min-w-0 truncate">{userEmail}</span>
-          <span className="shrink-0">
+          <span className="flex shrink-0 items-center gap-1">
+            <ThemeToggle />
             <SignOutButton />
           </span>
         </div>
@@ -422,7 +424,7 @@ export default function Sidebar({
             </Dialog.Description>
             <div className="mt-4 flex justify-end gap-2 text-sm">
               <Dialog.Close asChild>
-                <button className="rounded-lg px-3 py-1.5 text-[var(--text-muted)] hover:bg-white/10">
+                <button className="rounded-lg px-3 py-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-button-hover)]">
                   Cancel
                 </button>
               </Dialog.Close>

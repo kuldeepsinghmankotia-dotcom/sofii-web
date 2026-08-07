@@ -20,7 +20,7 @@ export default function SignOutButton() {
       <button
         onClick={handleSignOut}
         aria-label="Sign out"
-        className="rounded p-1 hover:bg-white/10 hover:text-[var(--text)]"
+        className="rounded p-1 hover:bg-[var(--surface-button-hover)] hover:text-[var(--text)]"
       >
         <LogOut size={14} />
       </button>

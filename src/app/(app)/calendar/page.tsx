@@ -52,7 +52,7 @@ export default async function CalendarPage({
 
       {connection ? (
         <div>
-          <div className="mb-6 flex items-center justify-between rounded-lg border border-[var(--border)] bg-white/[0.03] p-4">
+          <div className="mb-6 flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
             <span className="flex items-center gap-1.5 text-sm text-[var(--text)]">
               <CheckCircle2 size={15} className="text-emerald-400" />
               Connected to Google Calendar
@@ -71,7 +71,7 @@ export default async function CalendarPage({
             {events.map((event) => (
               <div
                 key={event.id}
-                className="rounded-lg border border-[var(--border)] bg-white/[0.03] p-3"
+                className="rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
               >
                 <div>{event.summary}</div>
                 <div className="text-xs text-[var(--text-muted)]">

@@ -71,7 +71,7 @@ export default function DocumentList({ initialDocuments }: { initialDocuments: D
         {documents.map((doc) => (
           <div
             key={doc.id}
-            className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-white/[0.03] p-3"
+            className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
           >
             <div className="min-w-0">
               <div className="truncate text-[var(--text)]">{doc.filename}</div>

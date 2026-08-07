@@ -25,7 +25,7 @@ export function CopyButton({ content, label }: { content: string; label?: string
       onClick={handleCopy}
       aria-label={copied ? 'Copied' : (label ?? 'Copy')}
       title="Copy"
-      className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+      className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-button-hover)] hover:text-[var(--text)]"
     >
       {copied ? <Check size={13} /> : <Copy size={13} />}
       {copied ? 'Copied' : (label ?? 'Copy')}
@@ -65,7 +65,7 @@ export function ShareButton({ content, label }: { content: string; label?: strin
       onClick={handleShare}
       aria-label={shared ? 'Copied' : (label ?? 'Share')}
       title="Share"
-      className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+      className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-button-hover)] hover:text-[var(--text)]"
     >
       {shared ? <Check size={13} /> : <Share2 size={13} />}
       {shared ? 'Copied' : (label ?? 'Share')}

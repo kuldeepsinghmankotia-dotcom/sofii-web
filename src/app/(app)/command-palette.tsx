@@ -125,7 +125,7 @@ export default function CommandPalette() {
               <button
                 onClick={() => void handleNewChat()}
                 disabled={creating}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5 disabled:opacity-60"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--surface-hover-strong)] disabled:opacity-60"
               >
                 <MessageSquarePlus size={15} className="accent-icon" />
                 {creating ? 'Creating…' : 'New chat'}
@@ -140,7 +140,7 @@ export default function CommandPalette() {
                     setOpen(false)
                     router.push(`/c/${c.id}`)
                   }}
-                  className="block w-full truncate rounded-lg px-3 py-2 text-left text-sm text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text)]"
+                  className="block w-full truncate rounded-lg px-3 py-2 text-left text-sm text-[var(--text-muted)] hover:bg-[var(--surface-hover-strong)] hover:text-[var(--text)]"
                 >
                   {c.title}
                 </button>
