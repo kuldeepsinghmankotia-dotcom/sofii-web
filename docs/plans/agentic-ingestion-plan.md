@@ -4,6 +4,13 @@
 > end-to-end, and deployed to production. Phases 2–8 (the Python/LangGraph
 > service, Redis, OCR ensemble, etc.) are not started. Update this line as
 > phases land — this file doesn't auto-track progress.
+>
+> **Admin account** was changed after Phase 1 shipped: it's
+> `kuldeepsinghmankotia@gmail.com`, not `amit21aim@gmail.com` as written
+> below — the `handle_new_user()` trigger now grants admin to that email
+> automatically at signup (see `20260807182735_change_admin_account.sql`),
+> not a one-time seed. The mentions of `amit21aim@gmail.com` further down
+> reflect the original decision and are left as historical context.
 
 ## Context
 
