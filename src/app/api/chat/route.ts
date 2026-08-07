@@ -17,8 +17,9 @@ import {
   touchConversation
 } from '@/lib/db/conversations'
 import { insertMessage, listMessages, type ChatMessage } from '@/lib/db/messages'
-import { listMemories, recordMemoryUsage } from '@/lib/db/memories'
+import { createMemory, listMemories, recordMemoryUsage } from '@/lib/db/memories'
 import { rankMemoriesByRelevance } from '@/lib/memory/ranking'
+import { extractMemoryCandidate } from '@/lib/memory/extract'
 import { hasAnyDocuments, matchDocumentChunks } from '@/lib/db/documents'
 import { embedText } from '@/lib/gemini/embeddings'
 import {
@@ -145,6 +146,31 @@ async function autoTitleConversation(
     if (title) await renameConversation(supabase, conversationId, title)
   } catch (error) {
     console.error('Auto-title error:', error)
+  }
+}
+
+// Fire-and-forget companion to autoTitleConversation above — same
+// "best-effort, log and swallow" shape since neither should ever fail or
+// delay the chat response itself. Notices durable facts in ordinary
+// conversation without the user explicitly asking Sofii to remember them
+// (that explicit path is the separate create_memory tool call in
+// src/lib/tools/execute.ts).
+async function autoExtractMemory(
+  userId: string,
+  userContent: string,
+  assistantContent: string,
+  supabase: Client
+): Promise<void> {
+  try {
+    const existing = await listMemories(supabase)
+    const candidate = await extractMemoryCandidate(
+      existing.map((m) => m.content),
+      userContent,
+      assistantContent
+    )
+    if (candidate) await createMemory(supabase, { userId, content: candidate, source: 'auto' })
+  } catch (error) {
+    console.error('Auto-memory extraction error:', error)
   }
 }
 
@@ -446,6 +472,10 @@ export async function POST(request: NextRequest): Promise<Response> {
         if (shouldAutoTitle) {
           await autoTitleConversation(conversationId, effectiveContent, fullContent, supabase)
         }
+
+        // Not awaited: a memory-worth-saving check shouldn't add latency to
+        // a response that already finished streaming.
+        void autoExtractMemory(user.id, effectiveContent, fullContent, supabase)
       }
     }
   })

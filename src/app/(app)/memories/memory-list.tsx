@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { Sparkles, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { createMemory, deleteMemory, updateMemory, type Memory } from '@/lib/db/memories'
 import { Tooltip } from '../tooltip'
@@ -142,6 +142,15 @@ export default function MemoryList({ initialMemories }: { initialMemories: Memor
               </Tooltip>
             </div>
             <div className="mt-1 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+              {memory.source === 'auto' && (
+                <span
+                  className="model-badge"
+                  title="Sofii noticed this in conversation — you didn't ask it to remember this"
+                >
+                  <Sparkles size={11} className="accent-icon" />
+                  Auto-detected
+                </span>
+              )}
               <span>{usageLabel(memory)}</span>
               {isStale(memory) && (
                 <span

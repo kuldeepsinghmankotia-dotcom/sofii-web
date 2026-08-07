@@ -3,6 +3,8 @@ import type { Database } from '@/types/database'
 
 type Client = SupabaseClient<Database>
 
+export type MemorySource = 'manual' | 'auto'
+
 export interface Memory {
   id: string
   content: string
@@ -10,9 +12,10 @@ export interface Memory {
   updated_at: string
   use_count: number
   last_used_at: string | null
+  source: MemorySource
 }
 
-const MEMORY_COLUMNS = 'id, content, created_at, updated_at, use_count, last_used_at'
+const MEMORY_COLUMNS = 'id, content, created_at, updated_at, use_count, last_used_at, source'
 
 export async function listMemories(supabase: Client): Promise<Memory[]> {
   const { data, error } = await supabase
@@ -21,21 +24,25 @@ export async function listMemories(supabase: Client): Promise<Memory[]> {
     .order('updated_at', { ascending: false })
 
   if (error) throw error
-  return data
+  return data as Memory[]
 }
 
 export async function createMemory(
   supabase: Client,
-  params: { userId: string; content: string }
+  params: { userId: string; content: string; source?: MemorySource }
 ): Promise<Memory> {
   const { data, error } = await supabase
     .from('memories')
-    .insert({ user_id: params.userId, content: params.content })
+    .insert({
+      user_id: params.userId,
+      content: params.content,
+      source: params.source ?? 'manual'
+    })
     .select(MEMORY_COLUMNS)
     .single()
 
   if (error) throw error
-  return data
+  return data as Memory
 }
 
 export async function updateMemory(
@@ -51,7 +58,7 @@ export async function updateMemory(
     .single()
 
   if (error) throw error
-  return data
+  return data as Memory
 }
 
 export async function deleteMemory(supabase: Client, id: string): Promise<void> {
