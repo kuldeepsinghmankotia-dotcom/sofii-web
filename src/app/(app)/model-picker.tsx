@@ -1,6 +1,7 @@
 'use client'
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { motion, useReducedMotion } from 'framer-motion'
 import { Check, ChevronDown, Sparkles, Zap } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
@@ -47,17 +48,20 @@ export function ModelPicker({
   model: ModelChoice
   onChange: (model: ModelChoice) => void
 }) {
+  const reducedMotion = useReducedMotion()
+
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button
+        <motion.button
+          whileTap={reducedMotion ? undefined : { scale: 0.95 }}
           type="button"
           className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1 text-xs font-medium text-[var(--text-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--text)]"
         >
           {model === 'groq' ? <Zap size={13} /> : <Sparkles size={13} />}
-          {MODEL_INFO[model].label}
+          <span className="hidden sm:inline">{MODEL_INFO[model].label}</span>
           <ChevronDown size={13} className="opacity-60" />
-        </button>
+        </motion.button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
@@ -76,7 +80,7 @@ export function ModelPicker({
                 <span className="block text-[var(--text)]">{MODEL_INFO[key].label}</span>
                 <span className="block text-xs">{MODEL_INFO[key].hint}</span>
               </span>
-              {model === key && <Check size={14} className="accent-text shrink-0" />}
+              {model === key && <Check size={14} className="accent-icon shrink-0" />}
             </DropdownMenu.Item>
           ))}
         </DropdownMenu.Content>

@@ -2,6 +2,7 @@ import { Calendar as CalendarIcon, CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getCalendarConnection } from '@/lib/db/calendar'
 import { getValidAccessToken, listUpcomingEvents } from '@/lib/google/calendar'
+import { PageHeader } from '../page-header'
 import DisconnectButton from './disconnect-button'
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -31,14 +32,12 @@ export default async function CalendarPage({
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
-      <h1 className="mb-2 flex items-center gap-2 text-xl font-bold text-[var(--text)]">
-        <CalendarIcon size={20} className="accent-text" />
-        Calendar
-      </h1>
-      <p className="mb-6 text-sm text-[var(--text-muted)]">
-        Connect Google Calendar so Sofii can check and create events for you in chat.
-      </p>
+    <div className="mx-auto max-w-2xl p-4 sm:p-6">
+      <PageHeader
+        icon={CalendarIcon}
+        title="Calendar"
+        description="Connect Google Calendar so Sofii can check and create events for you in chat."
+      />
 
       {connected && (
         <p className="mb-4 rounded-lg bg-emerald-500/10 p-3 text-sm text-emerald-400">

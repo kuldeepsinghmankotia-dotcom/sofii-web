@@ -192,7 +192,7 @@ export default function Sidebar({
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="flex shrink-0 items-center justify-between px-4 pt-5 pb-3">
+        <div className="flex shrink-0 items-center justify-between px-4 pt-[calc(1.25rem+env(safe-area-inset-top))] pb-3">
           <Link
             href="/"
             onClick={onClose}
@@ -217,7 +217,7 @@ export default function Sidebar({
             disabled={creating}
             className="relative flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-strong)] px-3 py-2.5 text-sm font-medium text-[var(--text)] transition hover:border-[var(--accent-a)] hover:shadow-[0_0_20px_rgba(34,211,238,0.15)] disabled:opacity-60"
           >
-            <Plus size={16} className="accent-text" aria-hidden="true" />
+            <Plus size={16} className="accent-icon" aria-hidden="true" />
             {creating ? 'Creating…' : 'New chat'}
           </button>
         </div>
@@ -285,7 +285,7 @@ export default function Sidebar({
                           <DropdownMenu.Trigger asChild>
                             <button
                               aria-label={`More actions for ${c.title}`}
-                              className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 hover:bg-white/10 hover:text-[var(--text)] group-hover:opacity-100 data-[state=open]:opacity-100"
+                              className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-100 hover:bg-white/10 hover:text-[var(--text)] md:opacity-0 md:group-hover:opacity-100 data-[state=open]:opacity-100"
                             >
                               <MoreHorizontal size={15} />
                             </button>
@@ -340,7 +340,7 @@ export default function Sidebar({
           ))}
         </div>
 
-        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] px-3 py-2.5 text-xs text-[var(--text-muted)]">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] px-3 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] text-xs text-[var(--text-muted)]">
           <span className="min-w-0 truncate">{userEmail}</span>
           <span className="shrink-0">
             <SignOutButton />

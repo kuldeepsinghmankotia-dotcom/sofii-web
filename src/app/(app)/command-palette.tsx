@@ -99,7 +99,7 @@ export default function CommandPalette() {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.12 }}
-          className="fixed inset-0 z-[60] flex items-start justify-center bg-black/70 pt-24"
+          className="fixed inset-0 z-[60] flex items-start justify-center bg-black/70 p-4 pt-[max(1.5rem,env(safe-area-inset-top))] sm:pt-24"
           onClick={() => setOpen(false)}
         >
           <motion.div
@@ -127,7 +127,7 @@ export default function CommandPalette() {
                 disabled={creating}
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5 disabled:opacity-60"
               >
-                <MessageSquarePlus size={15} className="accent-text" />
+                <MessageSquarePlus size={15} className="accent-icon" />
                 {creating ? 'Creating…' : 'New chat'}
               </button>
               {filtered.length === 0 && query && (

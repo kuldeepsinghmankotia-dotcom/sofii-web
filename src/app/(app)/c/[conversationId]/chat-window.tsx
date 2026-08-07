@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { toast } from 'sonner'
 import {
+  ArrowDown,
   ImagePlus,
   Mic,
   Pencil,
@@ -12,6 +13,7 @@ import {
   Send,
   Sparkles,
   Square,
+  User,
   Volume2,
   VolumeX,
   Wand2,
@@ -43,6 +45,18 @@ const WAKE_PHRASES = ['sofii', 'sofi', 'sophie', 'sophia', 'sofia']
 function containsWakeWord(transcript: string): boolean {
   const lower = transcript.toLowerCase()
   return WAKE_PHRASES.some((phrase) => lower.includes(phrase))
+}
+
+// Locale pinned to 'en-US' (rather than the runtime default) so formatting
+// is identical between Next's server render and the browser's hydration —
+// left as undefined, Node's default ICU locale and the browser's can
+// disagree on details like whether AM/PM is included, which is a real
+// hydration mismatch (verified live: server produced "11:50", client
+// produced "11:50 AM" for the same timestamp).
+function formatTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
 
 const SPEECH_RMS_THRESHOLD = 0.02
@@ -153,11 +167,18 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   // trade-off for keeping model choice a lightweight per-browser toggle
   // rather than a schema change.
   const [messageModels, setMessageModels] = useState<Record<string, ModelChoice>>({})
+  // Whether the view should keep following new content as it streams in.
+  // Starts true (a fresh conversation should land at the bottom) and flips
+  // to false the moment the user scrolls up to reread something — without
+  // this, every streamed token force-scrolled the view back down, making it
+  // impossible to read earlier messages while a reply was still generating.
+  const [stickToBottom, setStickToBottom] = useState(true)
   const reducedMotion = useReducedMotion()
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<BlobPart[]>([])
   const imageInputRef = useRef<HTMLInputElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const programmaticScrollRef = useRef(false)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const vadStopRef = useRef<(() => void) | null>(null)
   const heardSpeechRef = useRef(true)
@@ -176,11 +197,41 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
 
   // Runs on every messages change, including each streamed chunk (each one
   // is its own setMessages call), so the view keeps following a reply as it
-  // streams in rather than only jumping down once at the end.
+  // streams in — but only while stickToBottom is true, so a user who's
+  // scrolled up to reread something doesn't get yanked back down mid-stream.
   useEffect(() => {
     const container = messagesContainerRef.current
-    if (container) container.scrollTop = container.scrollHeight
-  }, [messages])
+    if (container && stickToBottom) container.scrollTop = container.scrollHeight
+  }, [messages, stickToBottom])
+
+  const SCROLL_BOTTOM_THRESHOLD_PX = 80
+
+  const handleMessagesScroll = (): void => {
+    const container = messagesContainerRef.current
+    if (!container) return
+    // Ignored while a "Jump to latest" smooth-scroll is in flight — the
+    // scroll events fired mid-animation reflect a position that hasn't
+    // reached the bottom yet, and without this guard they'd flip
+    // stickToBottom back to false before the animation settles, leaving the
+    // button stuck visible even though the view is about to be at the
+    // bottom anyway.
+    if (programmaticScrollRef.current) return
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight
+    setStickToBottom(distanceFromBottom < SCROLL_BOTTOM_THRESHOLD_PX)
+  }
+
+  const scrollToLatest = (): void => {
+    const container = messagesContainerRef.current
+    if (container) {
+      programmaticScrollRef.current = true
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
+      window.setTimeout(() => {
+        programmaticScrollRef.current = false
+      }, 500)
+    }
+    setStickToBottom(true)
+  }
 
   // Separate effect (rather than folding into the mount-only one above) so
   // the cleanup always sees the current pendingImage rather than a stale
@@ -433,6 +484,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
       image_url: null
     }
 
+    setStickToBottom(true)
     setMessages((prev) => [...prev, userMessage, assistantPlaceholder])
 
     const { content: fullContent, ok } = await streamReplyInto(assistantId, { content, imageUrl })
@@ -711,19 +763,29 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="mb-2 flex items-center justify-end gap-3">
-        {isWakeListening && (
-          <span className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-            <span
-              className="h-2 w-2 animate-pulse rounded-full"
-              style={{ background: 'var(--accent-gradient)' }}
-            />
-            Listening for &ldquo;Sofii&rdquo;…
-          </span>
-        )}
+      <div className="mb-2 flex items-center justify-end gap-1.5 sm:gap-3">
+        <AnimatePresence>
+          {isWakeListening && (
+            <motion.span
+              initial={reducedMotion ? false : { opacity: 0, x: 6 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 6 }}
+              aria-label='Listening for "Sofii"'
+              className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]"
+            >
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 animate-pulse rounded-full"
+                style={{ background: 'var(--accent-gradient)' }}
+              />
+              <span className="hidden sm:inline">Listening for &ldquo;Sofii&rdquo;…</span>
+            </motion.span>
+          )}
+        </AnimatePresence>
         <ModelPicker model={model} onChange={setModel} />
         <Tooltip label={wakeWordEnabled ? 'Jarvis mode on — say "Sofii" anytime' : 'Enable Jarvis mode'}>
-          <button
+          <motion.button
+            whileTap={reducedMotion ? undefined : { scale: 0.94 }}
             onClick={() => {
               setWakeWordEnabled((prev) => {
                 const next = !prev
@@ -736,7 +798,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
               })
             }}
             aria-label="Toggle Jarvis hands-free mode"
-            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition sm:px-3 ${
               wakeWordEnabled
                 ? 'text-black'
                 : 'border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]'
@@ -744,11 +806,12 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
             style={wakeWordEnabled ? { background: 'var(--accent-gradient)' } : undefined}
           >
             <Wand2 size={13} />
-            Jarvis
-          </button>
+            <span className="hidden sm:inline">Jarvis</span>
+          </motion.button>
         </Tooltip>
         <Tooltip label={speakEnabled ? 'Spoken replies on' : 'Spoken replies off'}>
-          <button
+          <motion.button
+            whileTap={reducedMotion ? undefined : { scale: 0.9 }}
             onClick={() =>
               setSpeakEnabled((prev) => {
                 if (prev) window.speechSynthesis.cancel()
@@ -756,14 +819,19 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
               })
             }
             aria-label={speakEnabled ? 'Turn off spoken replies' : 'Turn on spoken replies'}
-            className="rounded-lg p-1 text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text)]"
+            className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text)] sm:p-1"
           >
             {speakEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}
-          </button>
+          </motion.button>
         </Tooltip>
       </div>
 
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-1 py-2">
+      <div className="relative min-h-0 flex-1">
+      <div
+        ref={messagesContainerRef}
+        onScroll={handleMessagesScroll}
+        className="h-full overflow-y-auto px-1 py-2"
+      >
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
           <AnimatePresence initial={false}>
             {messages.map((m, i) => {
@@ -782,74 +850,85 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
                   className={`group ${m.role === 'user' ? 'flex justify-end' : ''}`}
                 >
                   {m.role === 'user' ? (
-                  <div className="max-w-[75%]">
-                    {m.image_url && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={m.image_url}
-                        alt="Attached"
-                        className="mb-2 max-h-64 max-w-full rounded-lg object-contain"
-                      />
-                    )}
-                    {editingId === m.id ? (
-                      <div className="rounded-2xl rounded-tr-sm border border-[var(--border-strong)] bg-black/30 p-2">
-                        <textarea
-                          autoFocus
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault()
-                              void commitEdit(m.id)
-                            } else if (e.key === 'Escape') {
-                              cancelEdit()
-                            }
-                          }}
-                          rows={Math.min(8, editValue.split('\n').length)}
-                          className="w-full resize-none bg-transparent text-sm text-[var(--text)] outline-none"
+                  <div className="flex max-w-[85%] items-start gap-2.5 sm:max-w-[70%]">
+                    <div className="min-w-0 flex-1">
+                      {m.image_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={m.image_url}
+                          alt="Attached"
+                          className="mb-2 ml-auto max-h-64 max-w-full rounded-lg object-contain"
                         />
-                        <div className="mt-1 flex justify-end gap-2 text-xs">
-                          <button
-                            onClick={cancelEdit}
-                            className="rounded-md px-2 py-1 text-[var(--text-muted)] hover:bg-white/10"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={() => void commitEdit(m.id)}
-                            className="rounded-md px-2 py-1 font-medium text-black"
+                      )}
+                      {editingId === m.id ? (
+                        <div className="rounded-2xl rounded-tr-sm border border-[var(--border-strong)] bg-black/30 p-2">
+                          <textarea
+                            autoFocus
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault()
+                                void commitEdit(m.id)
+                              } else if (e.key === 'Escape') {
+                                cancelEdit()
+                              }
+                            }}
+                            rows={Math.min(8, editValue.split('\n').length)}
+                            className="w-full resize-none bg-transparent text-sm text-[var(--text)] outline-none"
+                          />
+                          <div className="mt-1 flex justify-end gap-2 text-xs">
+                            <button
+                              onClick={cancelEdit}
+                              className="rounded-md px-2 py-1 text-[var(--text-muted)] hover:bg-white/10"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => void commitEdit(m.id)}
+                              className="rounded-md px-2 py-1 font-medium text-black"
+                              style={{ background: 'var(--accent-gradient)' }}
+                            >
+                              Save & submit
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div
+                            className="rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap text-black"
                             style={{ background: 'var(--accent-gradient)' }}
                           >
-                            Save & submit
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div
-                          className="rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap text-black"
-                          style={{ background: 'var(--accent-gradient)' }}
-                        >
-                          {m.content}
-                        </div>
-                        <div className="mt-1 flex justify-end gap-1 opacity-0 transition group-hover:opacity-100">
-                          <CopyButton content={m.content} />
-                          <Tooltip label="Edit">
-                            <button
-                              onClick={() => startEdit(m)}
-                              aria-label="Edit message"
-                              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
-                            >
-                              <Pencil size={13} />
-                              Edit
-                            </button>
-                          </Tooltip>
-                        </div>
-                      </>
-                    )}
+                            {m.content}
+                          </div>
+                          <div className="mt-1 flex items-center justify-end gap-1 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
+                            <span className="text-xs text-[var(--text-muted)]">
+                              {formatTime(m.created_at)}
+                            </span>
+                            <CopyButton content={m.content} />
+                            <Tooltip label="Edit">
+                              <button
+                                onClick={() => startEdit(m)}
+                                aria-label="Edit message"
+                                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+                              >
+                                <Pencil size={13} />
+                                Edit
+                              </button>
+                            </Tooltip>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div
+                      aria-hidden="true"
+                      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--border-strong)] bg-white/5 text-[var(--text-muted)]"
+                    >
+                      <User size={14} />
+                    </div>
                   </div>
                 ) : (
-                  <div className="flex gap-3">
+                  <div className="flex max-w-[90%] gap-3">
                     <div
                       aria-hidden="true"
                       className="mt-0.5 h-7 w-7 shrink-0 rounded-full"
@@ -876,7 +955,12 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
                       ) : (
                         <AssistantContent content={m.content} />
                       )}
-                      <div className="mt-1 flex items-center gap-2 opacity-0 transition group-hover:opacity-100">
+                      <div className="mt-1 flex items-center gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
+                        {!isStreamingPlaceholder && (
+                          <span className="text-xs text-[var(--text-muted)]">
+                            {formatTime(m.created_at)}
+                          </span>
+                        )}
                         <CopyButton content={m.content} />
                         {isLastAssistantReply && (
                           <Tooltip label="Regenerate">
@@ -907,115 +991,165 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
           {isTranscribing && <div className="text-sm text-[var(--text-muted)]">Transcribing…</div>}
         </div>
       </div>
+      <AnimatePresence>
+        {!stickToBottom && (
+          <motion.button
+            initial={reducedMotion ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            whileTap={reducedMotion ? undefined : { scale: 0.94 }}
+            onClick={scrollToLatest}
+            aria-label="Jump to latest message"
+            className="glass absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--border-strong)] px-3 py-1.5 text-xs font-medium text-[var(--text)] shadow-[var(--shadow-md)]"
+          >
+            <ArrowDown size={13} />
+            Jump to latest
+          </motion.button>
+        )}
+      </AnimatePresence>
+      </div>
 
       <AnimatePresence>
         {pendingImage && (
           <motion.div
-            initial={reducedMotion ? false : { opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mx-auto mt-3 flex w-full max-w-3xl items-center gap-2 overflow-hidden rounded-lg border border-[var(--border)] bg-white/[0.03] p-2"
+            initial={reducedMotion ? false : { opacity: 0, scale: 0.9, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 8 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            className="mx-auto mt-3 w-full max-w-3xl"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={pendingImage.previewUrl}
-              alt="To send"
-              className="h-12 w-12 rounded object-cover"
-            />
-            <span className="flex-1 truncate text-sm text-[var(--text-muted)]">
+            <div className="relative inline-block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={pendingImage.previewUrl}
+                alt="To send"
+                className="h-20 w-20 rounded-xl border border-[var(--border)] object-cover shadow-[var(--shadow-md)]"
+              />
+              <Tooltip label="Remove image">
+                <motion.button
+                  whileTap={reducedMotion ? undefined : { scale: 0.88 }}
+                  onClick={clearPendingImage}
+                  aria-label="Remove attached image"
+                  className="glass absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border-strong)] text-[var(--text)] shadow-[var(--shadow-sm)] hover:bg-black/60"
+                >
+                  <X size={13} />
+                </motion.button>
+              </Tooltip>
+            </div>
+            <p className="mt-1.5 max-w-20 truncate text-xs text-[var(--text-muted)]">
               {pendingImage.file.name}
-            </span>
-            <Tooltip label="Remove image">
-              <button
-                onClick={clearPendingImage}
-                aria-label="Remove attached image"
-                className="rounded p-1 text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isRecording && micStream && (
+          // Fixed, viewport-centered overlay (not just centered within the
+          // composer strip) — a full "voice mode" takeover like Gemini
+          // Live/Jarvis, not a small inline indicator.
+          <motion.div
+            initial={reducedMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-black/90 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={reducedMotion ? false : { opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+            >
+              <VoiceOrb stream={micStream} size={260} />
+            </motion.div>
+            <p className="text-sm text-[var(--text-muted)]">Listening…</p>
+            <Tooltip label="Stop recording" side="bottom">
+              <motion.button
+                whileTap={reducedMotion ? undefined : { scale: 0.92 }}
+                onClick={stopRecording}
+                aria-label="Stop recording"
+                className="flex h-14 w-14 items-center justify-center rounded-full bg-red-600 text-white shadow-[0_0_30px_rgba(239,68,68,0.45)]"
               >
-                <X size={15} />
-              </button>
+                <Square size={18} fill="currentColor" />
+              </motion.button>
             </Tooltip>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {isRecording && micStream ? (
-        // Fixed, viewport-centered overlay (not just centered within the
-        // composer strip) — a full "voice mode" takeover like Gemini
-        // Live/Jarvis, not a small inline indicator.
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-black/90 backdrop-blur-sm">
-          <VoiceOrb stream={micStream} size={260} />
-          <p className="text-sm text-[var(--text-muted)]">Listening…</p>
-          <button
-            onClick={stopRecording}
-            className="flex items-center gap-2 rounded-full bg-red-600 px-8 py-3 font-medium text-white"
+      <div className="accent-ring mx-auto mt-4 flex w-full max-w-3xl items-end gap-2 rounded-2xl border border-[var(--border)] bg-white/[0.03] p-2">
+        <Tooltip label="Start recording">
+          <motion.button
+            whileTap={reducedMotion ? undefined : { scale: 0.9 }}
+            onClick={toggleRecording}
+            disabled={isTranscribing}
+            aria-label="Start voice recording"
+            className="relative rounded-xl px-3 py-2.5 hover:bg-white/5 disabled:opacity-60"
           >
-            <Square size={15} fill="currentColor" />
-            Stop
-          </button>
-        </div>
-      ) : (
-        <div className="accent-ring mx-auto mt-4 flex w-full max-w-3xl items-end gap-2 rounded-2xl border border-[var(--border)] bg-white/[0.03] p-2">
-          <Tooltip label="Start recording">
-            <button
-              onClick={toggleRecording}
-              disabled={isTranscribing}
-              aria-label="Start voice recording"
-              className="rounded-xl px-3 py-2.5 hover:bg-white/5 disabled:opacity-60"
-            >
-              <Mic size={18} />
-            </button>
-          </Tooltip>
-          <Tooltip label="Attach an image">
-            <button
-              onClick={() => imageInputRef.current?.click()}
-              disabled={uploadingImage}
-              aria-label="Attach an image"
-              className="rounded-xl px-3 py-2.5 hover:bg-white/5 disabled:opacity-60"
-            >
-              <ImagePlus size={18} />
-            </button>
-          </Tooltip>
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleImageSelect}
-            className="hidden"
-          />
-          <textarea
-            ref={composerRef}
-            rows={1}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Message Sofii... (Shift+Enter for a new line)"
-            className="max-h-[200px] flex-1 resize-none bg-transparent p-2 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
-          />
-          <button
-            onClick={sending ? handleStop : () => sendMessage()}
-            disabled={uploadingImage}
-            aria-label={sending ? 'Stop generating' : 'Send message'}
-            className={`flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-medium text-black transition disabled:opacity-60 ${
-              sending ? 'bg-red-500 text-white' : ''
-            }`}
-            style={sending ? undefined : { background: 'var(--accent-gradient)' }}
-          >
-            {uploadingImage ? (
-              'Uploading…'
-            ) : sending ? (
-              <>
-                <Square size={14} fill="currentColor" />
-                Stop
-              </>
-            ) : (
-              <>
-                <Send size={14} />
-                Send
-              </>
+            {isWakeListening && !reducedMotion && (
+              <motion.span
+                aria-hidden="true"
+                className="absolute inset-1 rounded-lg"
+                style={{ background: 'var(--accent-gradient)' }}
+                animate={{ opacity: [0.35, 0.05, 0.35], scale: [1, 1.25, 1] }}
+                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+              />
             )}
-          </button>
-        </div>
-      )}
+            <Mic size={18} className="relative" />
+          </motion.button>
+        </Tooltip>
+        <Tooltip label="Attach an image">
+          <motion.button
+            whileTap={reducedMotion ? undefined : { scale: 0.9 }}
+            onClick={() => imageInputRef.current?.click()}
+            disabled={uploadingImage}
+            aria-label="Attach an image"
+            className="rounded-xl px-3 py-2.5 hover:bg-white/5 disabled:opacity-60"
+          >
+            <ImagePlus size={18} />
+          </motion.button>
+        </Tooltip>
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleImageSelect}
+          className="hidden"
+        />
+        <textarea
+          ref={composerRef}
+          rows={1}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Message Sofii... (Shift+Enter for a new line)"
+          className="max-h-[200px] flex-1 resize-none bg-transparent p-2 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+        />
+        <motion.button
+          whileTap={reducedMotion ? undefined : { scale: 0.95 }}
+          onClick={sending ? handleStop : () => sendMessage()}
+          disabled={uploadingImage}
+          aria-label={sending ? 'Stop generating' : 'Send message'}
+          className={`flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-medium text-black transition disabled:opacity-60 ${
+            sending ? 'bg-red-500 text-white' : ''
+          }`}
+          style={sending ? undefined : { background: 'var(--accent-gradient)' }}
+        >
+          {uploadingImage ? (
+            'Uploading…'
+          ) : sending ? (
+            <>
+              <Square size={14} fill="currentColor" />
+              Stop
+            </>
+          ) : (
+            <>
+              <Send size={14} />
+              Send
+            </>
+          )}
+        </motion.button>
+      </div>
     </div>
   )
 }

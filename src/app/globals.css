@@ -38,6 +38,14 @@
   --font-display: var(--font-orbitron);
 }
 
+html {
+  /* Without this, overscrolling past the top/bottom on mobile Safari/Chrome
+     rubber-bands into the browser's own default white background for an
+     instant — a jarring flash that immediately reads as "not a native app"
+     next to Gemini/Copilot, which both suppress it the same way. */
+  overscroll-behavior-y: none;
+}
+
 body {
   background:
     radial-gradient(ellipse 60% 40% at 15% -10%, rgba(139, 92, 246, 0.16), transparent),
@@ -59,6 +67,13 @@ body {
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
+}
+/* accent-text's background-clip:text only works on text glyphs — an SVG
+   icon has no text to clip, so it just renders fully transparent
+   (currentColor resolves to the transparent color set above). Icons that
+   want the same accent treatment use this instead, a plain solid color. */
+.accent-icon {
+  color: var(--accent-a);
 }
 .accent-ring:focus-within {
   border-color: var(--border-strong);
