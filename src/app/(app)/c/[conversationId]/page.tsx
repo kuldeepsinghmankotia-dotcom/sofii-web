@@ -28,7 +28,11 @@ export default async function ConversationPage({
       <h1 className="mx-auto mb-4 w-full max-w-3xl shrink-0 truncate text-sm font-medium text-[var(--text-muted)]">
         {conversation.title}
       </h1>
-      <ChatWindow conversationId={conversationId} initialMessages={messages} />
+      <ChatWindow
+        conversationId={conversationId}
+        title={conversation.title}
+        initialMessages={messages}
+      />
     </div>
   )
 }

@@ -1,13 +1,24 @@
 'use client'
 
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type KeyboardEvent
+} from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { toast } from 'sonner'
 import {
   ArrowDown,
+  Camera,
+  Download,
   ImagePlus,
   Mic,
+  MoreHorizontal,
   Pencil,
   RotateCcw,
   Send,
@@ -22,8 +33,9 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { resizeImageToJpeg } from '@/lib/image/resize'
+import { downloadConversationAsMarkdown } from '@/lib/export/markdown'
 import VoiceOrb from './voice-orb'
-import { CopyButton, AssistantContent } from './message-content'
+import { CopyButton, ShareButton, AssistantContent } from './message-content'
 import { notifyConversationsChanged } from '../../sidebar'
 import { Tooltip } from '../../tooltip'
 import { ModelPicker, useSelectedModel, MODEL_INFO, type ModelChoice } from '../../model-picker'
@@ -31,6 +43,7 @@ import type { ChatMessage } from '@/lib/db/messages'
 
 type Props = {
   conversationId: string
+  title: string
   initialMessages: ChatMessage[]
 }
 
@@ -129,7 +142,7 @@ function attachSilenceAutoStop(
   return cleanup
 }
 
-export default function ChatWindow({ conversationId, initialMessages }: Props) {
+export default function ChatWindow({ conversationId, title, initialMessages }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -177,6 +190,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<BlobPart[]>([])
   const imageInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const programmaticScrollRef = useRef(false)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -272,11 +286,9 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     window.speechSynthesis.speak(utterance)
   }
 
-  const handleImageSelect = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-
+  // Shared by the gallery input, the camera input, and paste-from-clipboard
+  // — one resize/preview path regardless of where the image came from.
+  const handleImageFile = async (file: File): Promise<void> => {
     setUploadingImage(true)
     try {
       // Resizing (not just re-encoding) matters even for a single message:
@@ -294,6 +306,26 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
     } finally {
       setUploadingImage(false)
     }
+  }
+
+  const handleImageSelect = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    await handleImageFile(file)
+  }
+
+  // Ctrl/Cmd+V an image straight into the composer — desktop's equivalent
+  // of the mobile camera/gallery buttons, no file dialog needed. Only
+  // intercepts when the clipboard actually contains an image; a normal text
+  // paste falls through untouched.
+  const handleComposerPaste = async (e: ClipboardEvent<HTMLTextAreaElement>): Promise<void> => {
+    const item = Array.from(e.clipboardData.items).find((i) => i.type.startsWith('image/'))
+    if (!item) return
+    const file = item.getAsFile()
+    if (!file) return
+    e.preventDefault()
+    await handleImageFile(file)
   }
 
   const clearPendingImage = (): void => {
@@ -824,6 +856,33 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
             {speakEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}
           </motion.button>
         </Tooltip>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <motion.button
+              whileTap={reducedMotion ? undefined : { scale: 0.9 }}
+              aria-label="More conversation options"
+              title="More options"
+              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text)] sm:p-1"
+            >
+              <MoreHorizontal size={17} />
+            </motion.button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="end"
+              sideOffset={6}
+              className="radix-pop glass z-[70] min-w-44 rounded-lg border border-[var(--border-strong)] p-1 shadow-[var(--shadow-md)]"
+            >
+              <DropdownMenu.Item
+                onSelect={() => downloadConversationAsMarkdown(messages, title)}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-white/[0.06] data-[highlighted]:text-[var(--text)]"
+              >
+                <Download size={14} />
+                Export as Markdown
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       </div>
 
       <div className="relative min-h-0 flex-1">
@@ -906,6 +965,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
                               {formatTime(m.created_at)}
                             </span>
                             <CopyButton content={m.content} />
+                            <ShareButton content={m.content} />
                             <Tooltip label="Edit">
                               <button
                                 onClick={() => startEdit(m)}
@@ -962,6 +1022,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
                           </span>
                         )}
                         <CopyButton content={m.content} />
+                        {!isStreamingPlaceholder && <ShareButton content={m.content} />}
                         {isLastAssistantReply && (
                           <Tooltip label="Regenerate">
                             <button
@@ -1098,6 +1159,25 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
             <Mic size={18} className="relative" />
           </motion.button>
         </Tooltip>
+        <Tooltip label="Take a photo">
+          <motion.button
+            whileTap={reducedMotion ? undefined : { scale: 0.9 }}
+            onClick={() => cameraInputRef.current?.click()}
+            disabled={uploadingImage}
+            aria-label="Take a photo"
+            className="rounded-xl px-3 py-2.5 hover:bg-white/5 disabled:opacity-60 md:hidden"
+          >
+            <Camera size={18} />
+          </motion.button>
+        </Tooltip>
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleImageSelect}
+          className="hidden"
+        />
         <Tooltip label="Attach an image">
           <motion.button
             whileTap={reducedMotion ? undefined : { scale: 0.9 }}
@@ -1122,6 +1202,7 @@ export default function ChatWindow({ conversationId, initialMessages }: Props) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={(e) => void handleComposerPaste(e)}
           placeholder="Message Sofii... (Shift+Enter for a new line)"
           className="max-h-[200px] flex-1 resize-none bg-transparent p-2 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
         />

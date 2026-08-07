@@ -4,7 +4,7 @@ import { isValidElement, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { Check, Copy } from 'lucide-react'
+import { Check, Copy, Share2 } from 'lucide-react'
 
 export function CopyButton({ content, label }: { content: string; label?: string }) {
   const [copied, setCopied] = useState(false)
@@ -29,6 +29,46 @@ export function CopyButton({ content, label }: { content: string; label?: string
     >
       {copied ? <Check size={13} /> : <Copy size={13} />}
       {copied ? 'Copied' : (label ?? 'Copy')}
+    </button>
+  )
+}
+
+// navigator.share opens the OS share sheet on mobile Safari/Chrome (send to
+// Messages, WhatsApp, etc.) — where it's unavailable (most desktop
+// browsers), falls back to the same copy-to-clipboard UX as CopyButton
+// above, so the button always does *something* useful rather than silently
+// no-op'ing.
+export function ShareButton({ content, label }: { content: string; label?: string }) {
+  const [shared, setShared] = useState(false)
+
+  const handleShare = async (): Promise<void> => {
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ text: content })
+      } catch {
+        // Includes the user cancelling the share sheet — not an error.
+      }
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(content)
+      setShared(true)
+      setTimeout(() => setShared(false), 1500)
+    } catch {
+      // Clipboard access can be denied/unavailable — not worth an error UI.
+    }
+  }
+
+  return (
+    <button
+      onClick={handleShare}
+      aria-label={shared ? 'Copied' : (label ?? 'Share')}
+      title="Share"
+      className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-white/10 hover:text-[var(--text)]"
+    >
+      {shared ? <Check size={13} /> : <Share2 size={13} />}
+      {shared ? 'Copied' : (label ?? 'Share')}
     </button>
   )
 }
