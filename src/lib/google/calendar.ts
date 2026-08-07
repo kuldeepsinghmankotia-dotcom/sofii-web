@@ -1,6 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
-import { getCalendarConnection, updateCalendarAccessToken } from '@/lib/db/calendar'
+import {
+  getCalendarConnection,
+  getCalendarConnectionForUser,
+  updateCalendarAccessToken,
+  updateCalendarAccessTokenForUser
+} from '@/lib/db/calendar'
 import { refreshAccessToken } from '@/lib/google/oauth'
 
 type Client = SupabaseClient<Database>
@@ -26,6 +31,29 @@ export async function getValidAccessToken(supabase: Client): Promise<string | nu
 
   const refreshed = await refreshAccessToken(connection.refresh_token)
   await updateCalendarAccessToken(supabase, {
+    accessToken: refreshed.access_token,
+    expiresAt: new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
+  })
+  return refreshed.access_token
+}
+
+// Cron-safe counterpart to getValidAccessToken above — see
+// getCalendarConnectionForUser's doc comment for why this needs its own
+// explicitly user_id-scoped path rather than reusing the RLS-implicit one.
+export async function getValidAccessTokenForUser(
+  supabase: Client,
+  userId: string
+): Promise<string | null> {
+  const connection = await getCalendarConnectionForUser(supabase, userId)
+  if (!connection) return null
+
+  const expiresAt = new Date(connection.expires_at).getTime()
+  if (expiresAt - EXPIRY_SAFETY_MARGIN_MS > Date.now()) {
+    return connection.access_token
+  }
+
+  const refreshed = await refreshAccessToken(connection.refresh_token)
+  await updateCalendarAccessTokenForUser(supabase, userId, {
     accessToken: refreshed.access_token,
     expiresAt: new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
   })
