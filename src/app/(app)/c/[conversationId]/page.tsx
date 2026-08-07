@@ -31,6 +31,7 @@ export default async function ConversationPage({
       <ChatWindow
         conversationId={conversationId}
         title={conversation.title}
+        initialShareToken={conversation.share_token}
         initialMessages={messages}
       />
     </div>

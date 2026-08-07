@@ -17,6 +17,8 @@ import {
   Camera,
   Download,
   ImagePlus,
+  Link2,
+  Link2Off,
   Mic,
   MoreHorizontal,
   Pencil,
@@ -44,6 +46,7 @@ import type { ChatMessage } from '@/lib/db/messages'
 type Props = {
   conversationId: string
   title: string
+  initialShareToken: string | null
   initialMessages: ChatMessage[]
 }
 
@@ -142,7 +145,12 @@ function attachSilenceAutoStop(
   return cleanup
 }
 
-export default function ChatWindow({ conversationId, title, initialMessages }: Props) {
+export default function ChatWindow({
+  conversationId,
+  title,
+  initialShareToken,
+  initialMessages
+}: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -186,6 +194,8 @@ export default function ChatWindow({ conversationId, title, initialMessages }: P
   // this, every streamed token force-scrolled the view back down, making it
   // impossible to read earlier messages while a reply was still generating.
   const [stickToBottom, setStickToBottom] = useState(true)
+  const [shareToken, setShareToken] = useState(initialShareToken)
+  const [sharing, setSharing] = useState(false)
   const reducedMotion = useReducedMotion()
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<BlobPart[]>([])
@@ -793,6 +803,54 @@ export default function ChatWindow({ conversationId, title, initialMessages }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wakeWordEnabled, isRecording, voiceTurnActive, isSpeaking])
 
+  // Generates a fresh token (src/app/api/conversations/[conversationId]/share/route.ts
+  // POST) and copies the resulting link immediately — sharing and copying are the
+  // same action from the user's point of view, no reason to make it two steps.
+  const handleShareConversation = async (): Promise<void> => {
+    setSharing(true)
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/share`, {
+        method: 'POST'
+      })
+      if (!response.ok) throw new Error('Failed to create share link')
+      const { url } = (await response.json()) as { url: string }
+      await navigator.clipboard.writeText(url)
+      setShareToken(url.split('/share/')[1])
+      toast.success('Share link copied to clipboard')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error(message)
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  const handleCopyShareLink = async (): Promise<void> => {
+    if (!shareToken) return
+    await navigator.clipboard.writeText(`${window.location.origin}/share/${shareToken}`)
+    toast.success('Share link copied to clipboard')
+  }
+
+  // Sets share_token back to null — the old link 404s immediately (the
+  // public page looks it up by exact token match, see
+  // src/app/share/[token]/page.tsx).
+  const handleRevokeShare = async (): Promise<void> => {
+    setSharing(true)
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/share`, {
+        method: 'DELETE'
+      })
+      if (!response.ok) throw new Error('Failed to stop sharing')
+      setShareToken(null)
+      toast.success('Stopped sharing this conversation')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error(message)
+    } finally {
+      setSharing(false)
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="mb-2 flex items-center justify-end gap-1.5 sm:gap-3">
@@ -880,6 +938,34 @@ export default function ChatWindow({ conversationId, title, initialMessages }: P
                 <Download size={14} />
                 Export as Markdown
               </DropdownMenu.Item>
+              {shareToken ? (
+                <>
+                  <DropdownMenu.Item
+                    onSelect={() => void handleCopyShareLink()}
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-white/[0.06] data-[highlighted]:text-[var(--text)]"
+                  >
+                    <Link2 size={14} />
+                    Copy share link
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    disabled={sharing}
+                    onSelect={() => void handleRevokeShare()}
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--danger)] outline-none data-[highlighted]:bg-red-500/10 data-[disabled]:opacity-60"
+                  >
+                    <Link2Off size={14} />
+                    Stop sharing
+                  </DropdownMenu.Item>
+                </>
+              ) : (
+                <DropdownMenu.Item
+                  disabled={sharing}
+                  onSelect={() => void handleShareConversation()}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] outline-none data-[highlighted]:bg-white/[0.06] data-[highlighted]:text-[var(--text)] data-[disabled]:opacity-60"
+                >
+                  <Link2 size={14} />
+                  {sharing ? 'Sharing…' : 'Share conversation'}
+                </DropdownMenu.Item>
+              )}
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
