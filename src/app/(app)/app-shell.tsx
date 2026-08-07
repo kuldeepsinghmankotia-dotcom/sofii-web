@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from 'react'
 import { usePathname } from 'next/navigation'
+import { motion, type PanInfo } from 'framer-motion'
 import { Menu } from 'lucide-react'
 import Sidebar from './sidebar'
 import CommandPalette from './command-palette'
@@ -32,6 +33,15 @@ export default function AppShell({
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
   const sectionTitle = SECTION_TITLES[pathname]
+
+  // onPan/onPanEnd (not drag) — this catcher never visually moves, it just
+  // detects the gesture and hands off to the same sidebarOpen state the
+  // hamburger button already sets. Only mounted while the sidebar is
+  // closed so it can't fight with the sidebar's own drag-to-close handler
+  // in sidebar.tsx once open.
+  const handleEdgePanEnd = (_e: unknown, info: PanInfo): void => {
+    if (info.offset.x > 60 || info.velocity.x > 500) setSidebarOpen(true)
+  }
 
   return (
     <TooltipProvider>
@@ -72,6 +82,13 @@ export default function AppShell({
           </header>
           <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
         </div>
+        {!sidebarOpen && (
+          <motion.div
+            onPanEnd={handleEdgePanEnd}
+            aria-hidden="true"
+            className="fixed inset-y-0 left-0 z-30 w-5 md:hidden"
+          />
+        )}
         <ReminderPoller />
         <PushSubscribe />
         <CommandPalette />

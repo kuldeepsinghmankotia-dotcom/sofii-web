@@ -2,8 +2,8 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { AnimatePresence, motion, useAnimation, type PanInfo } from 'framer-motion'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
 import {
@@ -22,6 +22,15 @@ import { createClient } from '@/lib/supabase/client'
 import type { ConversationSummary } from '@/lib/db/conversations'
 import SignOutButton from './sign-out-button'
 import { Tooltip } from './tooltip'
+import { MOBILE_QUERY, useIsMobile } from './use-is-mobile'
+
+// w-72 in Tailwind's default scale.
+const SIDEBAR_WIDTH_PX = 288
+// Below this leftward drag distance (or above this leftward velocity), a
+// release snaps back open instead of closing — distinguishes an intentional
+// dismiss swipe from an incidental drag/scroll touch.
+const CLOSE_DRAG_THRESHOLD_PX = 80
+const CLOSE_VELOCITY_THRESHOLD = 500
 
 // Any mutation anywhere in the app (new chat, rename, delete, or the
 // server-side auto-title after a conversation's first exchange) dispatches
@@ -90,6 +99,45 @@ export default function Sidebar({
   const router = useRouter()
   const pathname = usePathname()
   const activeId = pathname.match(/^\/c\/([^/]+)/)?.[1]
+  const isMobile = useIsMobile()
+  const dragControls = useAnimation()
+  const hasSetInitialPositionRef = useRef(false)
+
+  // Keeps the panel's actual transform in sync with the open/closed prop
+  // and the mobile/desktop breakpoint — the single source of truth for
+  // where the drag gesture below should leave it once released.
+  //
+  // Reads the viewport directly here via matchMedia rather than trusting
+  // the isMobile hook value: that hook intentionally starts false and only
+  // resolves the real value a tick later (via queueMicrotask, to stay
+  // hydration-safe for the `drag` prop below) — using it here too would
+  // race this effect against that correction, and depending on exact
+  // timing could animate a visible slide-shut on every mobile page load
+  // instead of mounting already-closed. Reading matchMedia fresh means the
+  // very first .set() is always correct immediately, regardless of that
+  // timing. The isMobile *hook* value is still a dependency so this reruns
+  // (harmlessly — same real position, .start() to itself is a no-op) once
+  // it resolves, keeping things in sync if the two ever diverge.
+  useEffect(() => {
+    const reallyMobile = window.matchMedia(MOBILE_QUERY).matches
+    const x = reallyMobile ? (open ? 0 : -SIDEBAR_WIDTH_PX) : 0
+    if (!hasSetInitialPositionRef.current) {
+      dragControls.set({ x })
+      hasSetInitialPositionRef.current = true
+    } else {
+      dragControls.start({ x })
+    }
+  }, [open, isMobile, dragControls])
+
+  const handleDragEnd = (_e: unknown, info: PanInfo): void => {
+    const shouldClose =
+      info.offset.x < -CLOSE_DRAG_THRESHOLD_PX || info.velocity.x < -CLOSE_VELOCITY_THRESHOLD
+    if (shouldClose) {
+      onClose()
+    } else {
+      dragControls.start({ x: 0 })
+    }
+  }
 
   const refresh = async (): Promise<void> => {
     const supabase = createClient()
@@ -187,10 +235,14 @@ export default function Sidebar({
         )}
       </AnimatePresence>
 
-      <aside
-        className={`glass fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col border-r border-[var(--border)] transition-transform duration-200 ease-out md:static md:z-auto md:translate-x-0 ${
-          open ? 'translate-x-0' : '-translate-x-full'
-        }`}
+      <motion.aside
+        drag={isMobile ? 'x' : false}
+        dragConstraints={{ left: -SIDEBAR_WIDTH_PX, right: 0 }}
+        dragElastic={0.05}
+        animate={dragControls}
+        onDragEnd={handleDragEnd}
+        transition={{ type: 'tween', duration: 0.2, ease: 'easeOut' }}
+        className="glass fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col border-r border-[var(--border)] md:static md:z-auto"
       >
         <div className="flex shrink-0 items-center justify-between px-4 pt-[calc(1.25rem+env(safe-area-inset-top))] pb-3">
           <Link
@@ -346,7 +398,7 @@ export default function Sidebar({
             <SignOutButton />
           </span>
         </div>
-      </aside>
+      </motion.aside>
 
       <Dialog.Root
         open={confirmDeleteId !== null}
