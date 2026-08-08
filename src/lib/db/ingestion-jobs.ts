@@ -11,16 +11,17 @@ export interface IngestionJob {
   error_message: string | null
   document_id: string | null
   filename: string
+  storage_path: string | null
 }
 
 export async function createIngestionJob(
   supabase: Client,
-  params: { userId: string; filename: string }
+  params: { userId: string; filename: string; storagePath: string }
 ): Promise<IngestionJob> {
   const { data, error } = await supabase
     .from('ingestion_jobs')
-    .insert({ user_id: params.userId, filename: params.filename })
-    .select('id, status, error_message, document_id, filename')
+    .insert({ user_id: params.userId, filename: params.filename, storage_path: params.storagePath })
+    .select('id, status, error_message, document_id, filename, storage_path')
     .single()
 
   if (error) throw error
@@ -33,7 +34,7 @@ export async function getIngestionJob(
 ): Promise<IngestionJob | null> {
   const { data, error } = await supabase
     .from('ingestion_jobs')
-    .select('id, status, error_message, document_id, filename')
+    .select('id, status, error_message, document_id, filename, storage_path')
     .eq('id', jobId)
     .maybeSingle()
 
@@ -41,10 +42,29 @@ export async function getIngestionJob(
   return data as IngestionJob | null
 }
 
+const DOCUMENT_UPLOADS_BUCKET = 'document-uploads'
+
+// Best-effort: a Storage cleanup failure shouldn't block marking a job
+// failed or block the user's own retry — worst case is the same orphaned
+// file this function exists to prevent, not a broken flow.
+async function deleteStorageObject(supabase: Client, storagePath: string | null): Promise<void> {
+  if (!storagePath) return
+  try {
+    await supabase.storage.from(DOCUMENT_UPLOADS_BUCKET).remove([storagePath])
+  } catch (error) {
+    console.error('Failed to delete orphaned Storage object:', error)
+  }
+}
+
+// storagePath is passed in by the caller (which already has it in scope
+// from the upload it just did) rather than re-fetched, and cleaned up here
+// — a failed ingestion job previously left its uploaded file in Storage
+// forever, since nothing ever recorded where it went.
 export async function markIngestionJobFailed(
   supabase: Client,
   jobId: string,
-  errorMessage: string
+  errorMessage: string,
+  storagePath?: string | null
 ): Promise<void> {
   const { error } = await supabase
     .from('ingestion_jobs')
@@ -52,6 +72,7 @@ export async function markIngestionJobFailed(
     .eq('id', jobId)
 
   if (error) throw error
+  if (storagePath) await deleteStorageObject(supabase, storagePath)
 }
 
 const STUCK_JOB_TIMEOUT_MINUTES = 10
@@ -67,12 +88,29 @@ const STUCK_JOB_TIMEOUT_MINUTES = 10
 export async function markStuckIngestionJobsFailed(supabase: Client, userId: string): Promise<void> {
   const cutoff = new Date(Date.now() - STUCK_JOB_TIMEOUT_MINUTES * 60_000).toISOString()
 
-  const { error } = await supabase
+  // Selected first (not a blind bulk UPDATE) so each stuck job's uploaded
+  // file can actually be found and cleaned up afterward — the Python
+  // service that would normally do this crashed or was killed, which is
+  // exactly why the job is stuck in the first place.
+  const { data: stuck, error: selectError } = await supabase
     .from('ingestion_jobs')
-    .update({ status: 'failed', error_message: 'Ingestion timed out' })
+    .select('id, storage_path')
     .eq('user_id', userId)
     .eq('status', 'processing')
     .lt('updated_at', cutoff)
 
-  if (error) throw error
+  if (selectError) throw selectError
+  if (!stuck || stuck.length === 0) return
+
+  const { error: updateError } = await supabase
+    .from('ingestion_jobs')
+    .update({ status: 'failed', error_message: 'Ingestion timed out' })
+    .in(
+      'id',
+      stuck.map((job) => job.id)
+    )
+
+  if (updateError) throw updateError
+
+  await Promise.all(stuck.map((job) => deleteStorageObject(supabase, job.storage_path)))
 }

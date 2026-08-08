@@ -15,6 +15,7 @@ async def persist_node(state: IngestionState) -> dict:
                 "filename": state.filename,
                 "source_type": state.detected_format,
                 "ingested_by": "python",
+                "storage_path": state.storage_path,
                 "metadata": {},
             }
         )

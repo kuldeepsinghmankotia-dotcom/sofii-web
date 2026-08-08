@@ -88,7 +88,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     return new Response(`Failed to upload file: ${uploadError.message}`, { status: 500 })
   }
 
-  const job = await createIngestionJob(supabase, { userId: user.id, filename: file.name })
+  const job = await createIngestionJob(supabase, { userId: user.id, filename: file.name, storagePath })
 
   try {
     const upstream = await fetch(`${serviceUrl}/ingest`, {
@@ -108,7 +108,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    await markIngestionJobFailed(supabase, job.id, `Ingestion service unreachable: ${message}`)
+    // The file was already uploaded above but the job never made it to the
+    // Python service, so nothing will ever process (or clean up) it —
+    // delete it now rather than leaving it orphaned in Storage forever.
+    await markIngestionJobFailed(supabase, job.id, `Ingestion service unreachable: ${message}`, storagePath)
     return new Response('Ingestion service unreachable', { status: 502 })
   }
 

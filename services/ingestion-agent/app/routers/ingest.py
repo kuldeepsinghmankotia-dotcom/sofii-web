@@ -51,7 +51,7 @@ async def _run_ingestion_job(payload: IngestRequest) -> None:
         logger.exception("ingestion job failed", extra={"job_id": payload.job_id})
         ingestion_jobs_total.labels(status="failed").inc()
         try:
-            await mark_job_failed(payload.job_id, str(exc))
+            await mark_job_failed(payload.job_id, str(exc), payload.storage_path)
         except Exception:
             # The job_id itself may be what's malformed (e.g. not a valid
             # UUID) - in that case even this update fails. Logged so it's

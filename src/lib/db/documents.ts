@@ -9,6 +9,8 @@ export interface DocumentSummary {
   created_at: string
 }
 
+const DOCUMENT_UPLOADS_BUCKET = 'document-uploads'
+
 export interface DocumentChunkMatch {
   id: string
   document_id: string
@@ -81,7 +83,26 @@ export async function createDocument(
   return data
 }
 
+// Storage cleanup runs before the row delete (not after, and not
+// best-effort-skippable) so the storage_path is still readable — deleting
+// the row first would lose the only pointer back to the uploaded file.
+// PDF documents (source_type='pdf') never touch Storage at all (see
+// api/documents/upload/route.ts), so storage_path is null for them and
+// this is a no-op.
 export async function deleteDocument(supabase: Client, id: string): Promise<void> {
+  const { data: document } = await supabase
+    .from('documents')
+    .select('storage_path')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (document?.storage_path) {
+    const { error: storageError } = await supabase.storage
+      .from(DOCUMENT_UPLOADS_BUCKET)
+      .remove([document.storage_path])
+    if (storageError) console.error('Failed to delete document Storage object:', storageError)
+  }
+
   const { error } = await supabase.from('documents').delete().eq('id', id)
   if (error) throw error
 }
