@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, after } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type {
   ChatCompletionCreateParamsNonStreaming,
@@ -596,18 +596,28 @@ export async function POST(request: NextRequest): Promise<Response> {
           // new exchange, which the cache can't cheaply splice in-place —
           // simplest correct move there is to drop it and let the next
           // read repopulate from Supabase (still authoritative either way).
+          //
+          // Scheduled via after(), not bare `void`: this stream's Response
+          // is already in flight, and a plain un-awaited promise here isn't
+          // guaranteed to finish before Vercel tears down the invocation —
+          // confirmed live (the equivalent pattern in /api/query silently
+          // dropped its Redis write). after() is the supported way to run
+          // work post-response without making the client wait for it.
           if (regenerate) {
-            void invalidateCachedHistory(conversationId)
+            after(() => invalidateCachedHistory(conversationId))
           } else {
-            void appendCachedMessages(conversationId, [
-              { role: 'user', content: effectiveContent, image_url: effectiveImageUrl ?? null },
-              { role: 'assistant', content: fullContent, image_url: null }
-            ])
+            after(() =>
+              appendCachedMessages(conversationId, [
+                { role: 'user', content: effectiveContent, image_url: effectiveImageUrl ?? null },
+                { role: 'assistant', content: fullContent, image_url: null }
+              ])
+            )
           }
 
-          // Not awaited: a memory-worth-saving check shouldn't add latency
-          // to a response that already finished streaming.
-          void autoExtractMemory(user.id, effectiveContent, fullContent, supabase)
+          // Scheduled via after() for the same reason — a memory-worth-
+          // saving check shouldn't add latency to the stream, but it still
+          // needs to actually complete.
+          after(() => autoExtractMemory(user.id, effectiveContent, fullContent, supabase))
         } catch (persistError) {
           console.error('Failed to persist assistant reply after retry:', persistError)
           controller.enqueue(

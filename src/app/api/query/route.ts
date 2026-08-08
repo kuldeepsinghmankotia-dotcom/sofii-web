@@ -76,7 +76,10 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   if (upstream.ok && responseJson?.answer) {
-    void appendQueryExchange(threadId, { query, answer: responseJson.answer })
+    // Must be awaited, not fire-and-forget: this is a plain JSON response
+    // (no stream keeping the function alive afterward), so an un-awaited
+    // write here can be killed mid-flight once the response is returned.
+    await appendQueryExchange(threadId, { query, answer: responseJson.answer })
   }
 
   const outBody =
