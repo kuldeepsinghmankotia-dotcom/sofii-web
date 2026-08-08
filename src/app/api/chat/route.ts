@@ -541,27 +541,57 @@ export async function POST(request: NextRequest): Promise<Response> {
       } catch (error) {
         console.error(`${selectedModel} stream error:`, error)
         if (!fullContent) controller.enqueue(encoder.encode('Something went wrong.'))
-      } finally {
-        controller.close()
       }
 
+      // Deliberately NOT in a `finally` above, and controller.close() is
+      // deliberately delayed until after this persist attempt (not called
+      // the moment generation finishes) — a real production bug, found
+      // live: the assistant's full reply streamed to the browser
+      // successfully (so it looked fine to the user, and even survived
+      // into a Markdown export), but insertMessage() below threw with no
+      // error handling at all, so the DB write silently never happened.
+      // Every later turn in that conversation then fetched history missing
+      // that entire exchange — the model wasn't "forgetting" context, the
+      // context had genuinely never been saved. One retry covers the
+      // common transient case; if it still fails, the client is told
+      // explicitly rather than silently losing the turn.
       if (fullContent) {
-        await insertMessage(supabase, {
-          conversationId,
-          userId: user.id,
-          role: 'assistant',
-          content: fullContent
-        })
-        await touchConversation(supabase, conversationId)
-
-        if (shouldAutoTitle) {
-          await autoTitleConversation(conversationId, effectiveContent, fullContent, supabase)
+        const persistReply = async (): Promise<void> => {
+          await insertMessage(supabase, {
+            conversationId,
+            userId: user.id,
+            role: 'assistant',
+            content: fullContent
+          })
+          await touchConversation(supabase, conversationId)
         }
 
-        // Not awaited: a memory-worth-saving check shouldn't add latency to
-        // a response that already finished streaming.
-        void autoExtractMemory(user.id, effectiveContent, fullContent, supabase)
+        try {
+          try {
+            await persistReply()
+          } catch (firstError) {
+            console.error('Failed to persist assistant reply, retrying once:', firstError)
+            await persistReply()
+          }
+
+          if (shouldAutoTitle) {
+            await autoTitleConversation(conversationId, effectiveContent, fullContent, supabase)
+          }
+
+          // Not awaited: a memory-worth-saving check shouldn't add latency
+          // to a response that already finished streaming.
+          void autoExtractMemory(user.id, effectiveContent, fullContent, supabase)
+        } catch (persistError) {
+          console.error('Failed to persist assistant reply after retry:', persistError)
+          controller.enqueue(
+            encoder.encode(
+              "\n\n⚠️ This reply couldn't be saved, so it won't be remembered in later messages — please try asking again if that matters here."
+            )
+          )
+        }
       }
+
+      controller.close()
     }
   })
 
