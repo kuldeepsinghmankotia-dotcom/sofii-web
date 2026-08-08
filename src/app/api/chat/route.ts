@@ -313,7 +313,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (userDocuments.length > 0) {
     try {
       const queryEmbedding = await embedText(effectiveContent)
-      relevantChunks = await matchDocumentChunks(supabase, queryEmbedding, DOCUMENT_RECALL_LIMIT)
+      relevantChunks = await matchDocumentChunks(supabase, queryEmbedding, DOCUMENT_RECALL_LIMIT, effectiveContent)
     } catch (error) {
       // Document recall is a bonus, not a hard dependency — a Gemini outage
       // shouldn't take down chat entirely.

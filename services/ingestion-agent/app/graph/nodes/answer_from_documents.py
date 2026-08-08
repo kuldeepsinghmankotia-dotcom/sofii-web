@@ -17,6 +17,7 @@ async def answer_from_documents_node(state: QueryState) -> dict:
             "query_embedding": json.dumps(embedding),
             "target_user_id": state.user_id,
             "match_count": 5,
+            "query_text": state.query,
         },
     ).execute()
     matches = response.data

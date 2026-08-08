@@ -127,14 +127,20 @@ export async function insertChunks(
   if (error) throw error
 }
 
+// queryText enables the hybrid keyword side of retrieval (Postgres
+// full-text search, unioned with the vector top-K inside the RPC) —
+// optional and defaults to vector-only, since not every caller has (or
+// needs) the original query string on hand.
 export async function matchDocumentChunks(
   supabase: Client,
   queryEmbedding: number[],
-  matchCount = 5
+  matchCount = 5,
+  queryText = ''
 ): Promise<DocumentChunkMatch[]> {
   const { data, error } = await supabase.rpc('match_document_chunks', {
     query_embedding: JSON.stringify(queryEmbedding),
-    match_count: matchCount
+    match_count: matchCount,
+    query_text: queryText
   })
 
   if (error) throw error
