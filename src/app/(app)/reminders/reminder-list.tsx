@@ -86,7 +86,7 @@ export default function ReminderList({ initialReminders }: { initialReminders: R
         />
         <button
           onClick={handleAdd}
-          className="rounded-lg px-5 py-3 font-medium text-black disabled:opacity-60"
+          className="rounded-lg px-5 py-3 font-medium text-[var(--accent-gradient-text)] disabled:opacity-60"
           style={{ background: 'var(--accent-gradient)' }}
         >
           Add

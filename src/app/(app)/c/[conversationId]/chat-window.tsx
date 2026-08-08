@@ -925,7 +925,7 @@ export default function ChatWindow({
             aria-label="Toggle Jarvis hands-free mode"
             className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition sm:px-3 ${
               wakeWordEnabled
-                ? 'text-black'
+                ? 'text-[var(--accent-gradient-text)]'
                 : 'border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]'
             }`}
             style={wakeWordEnabled ? { background: 'var(--accent-gradient)' } : undefined}
@@ -1091,7 +1091,7 @@ export default function ChatWindow({
                             </button>
                             <button
                               onClick={() => void commitEdit(m.id)}
-                              className="rounded-md px-2 py-1 font-medium text-black"
+                              className="rounded-md px-2 py-1 font-medium text-[var(--accent-gradient-text)]"
                               style={{ background: 'var(--accent-gradient)' }}
                             >
                               Save & submit
@@ -1101,8 +1101,8 @@ export default function ChatWindow({
                       ) : (
                         <>
                           <div
-                            className="rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap text-black"
-                            style={{ background: 'var(--accent-gradient)' }}
+                            className="rounded-2xl rounded-tr-sm border border-[var(--border)] px-4 py-2.5 text-sm whitespace-pre-wrap"
+                            style={{ background: 'var(--user-bubble-bg)', color: 'var(--user-bubble-text)' }}
                           >
                             {m.content}
                           </div>
@@ -1140,7 +1140,7 @@ export default function ChatWindow({
                       className="mt-0.5 h-7 w-7 shrink-0 rounded-full"
                       style={{
                         background: 'var(--accent-gradient)',
-                        boxShadow: '0 0 14px rgba(139,92,246,0.45)'
+                        boxShadow: 'var(--avatar-glow-sm)'
                       }}
                     />
                     <div className="min-w-0 flex-1">
@@ -1237,7 +1237,7 @@ export default function ChatWindow({
                   whileTap={reducedMotion ? undefined : { scale: 0.88 }}
                   onClick={clearPendingImage}
                   aria-label="Remove attached image"
-                  className="glass absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border-strong)] text-[var(--text)] shadow-[var(--shadow-sm)] hover:bg-black/60"
+                  className="glass absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border-strong)] text-[var(--text)] shadow-[var(--shadow-sm)] hover:bg-[var(--surface-button-hover)]"
                 >
                   <X size={13} />
                 </motion.button>
@@ -1349,7 +1349,7 @@ export default function ChatWindow({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={(e) => void handleComposerPaste(e)}
-          placeholder="Message Sofii... (Shift+Enter for a new line)"
+          placeholder="Message Sofii..."
           className="max-h-[200px] flex-1 resize-none bg-transparent p-2 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
         />
         <motion.button
@@ -1357,7 +1357,7 @@ export default function ChatWindow({
           onClick={sending ? handleStop : () => sendMessage()}
           disabled={uploadingImage}
           aria-label={sending ? 'Stop generating' : 'Send message'}
-          className={`flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-medium text-black transition disabled:opacity-60 ${
+          className={`flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-medium text-[var(--accent-gradient-text)] transition disabled:opacity-60 ${
             sending ? 'bg-red-500 text-white' : ''
           }`}
           style={sending ? undefined : { background: 'var(--accent-gradient)' }}

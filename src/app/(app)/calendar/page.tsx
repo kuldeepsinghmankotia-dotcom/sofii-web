@@ -84,7 +84,7 @@ export default async function CalendarPage({
       ) : (
         <a
           href="/api/auth/google/connect"
-          className="inline-block rounded-lg px-5 py-3 font-medium text-black"
+          className="inline-block rounded-lg px-5 py-3 font-medium text-[var(--accent-gradient-text)]"
           style={{ background: 'var(--accent-gradient)' }}
         >
           Connect Google Calendar

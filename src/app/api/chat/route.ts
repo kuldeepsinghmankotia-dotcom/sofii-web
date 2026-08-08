@@ -237,10 +237,15 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const rateLimit = await getChatRatelimit().limit(user.id)
   if (!rateLimit.success) {
-    return new Response("You're sending messages too quickly — please slow down and try again shortly.", {
-      status: 429,
-      headers: { 'Retry-After': String(Math.max(1, Math.ceil((rateLimit.reset - Date.now()) / 1000))) }
-    })
+    return new Response(
+      "You're sending messages too quickly — please slow down and try again shortly.",
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(Math.max(1, Math.ceil((rateLimit.reset - Date.now()) / 1000)))
+        }
+      }
+    )
   }
 
   // getConversation is RLS-scoped: it returns null both when the
@@ -313,7 +318,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (userDocuments.length > 0) {
     try {
       const queryEmbedding = await embedText(effectiveContent)
-      relevantChunks = await matchDocumentChunks(supabase, queryEmbedding, DOCUMENT_RECALL_LIMIT, effectiveContent)
+      relevantChunks = await matchDocumentChunks(
+        supabase,
+        queryEmbedding,
+        DOCUMENT_RECALL_LIMIT,
+        effectiveContent
+      )
     } catch (error) {
       // Document recall is a bonus, not a hard dependency — a Gemini outage
       // shouldn't take down chat entirely.
@@ -402,169 +412,205 @@ export async function POST(request: NextRequest): Promise<Response> {
       }
 
       try {
+        // Set when Gemini's own attempt fails specifically due to its
+        // shared free-tier quota (20 generateContent requests/day across
+        // this whole app — chat, OCR, and memory extraction all draw from
+        // it, and it's been exhausted repeatedly during this project's own
+        // testing) — a genuinely common failure mode, not a rare edge case,
+        // so it gets a real fallback rather than a dead-end error.
+        let useGroqFallback = false
+
         if (selectedModel === 'gemini') {
-          const geminiContents = await toGeminiContents(conversationMessages)
-          const maxTokens = usesVision ? GEMINI_VISION_MAX_TOKENS : GEMINI_TEXT_MAX_TOKENS
+          try {
+            const geminiContents = await toGeminiContents(conversationMessages)
+            const maxTokens = usesVision ? GEMINI_VISION_MAX_TOKENS : GEMINI_TEXT_MAX_TOKENS
 
-          const { toolCalls, modelParts } = await streamGeminiRound(
-            geminiContents,
-            systemPrompt,
-            TOOL_DEFINITIONS,
-            maxTokens,
-            emit
-          )
+            const { toolCalls, modelParts } = await streamGeminiRound(
+              geminiContents,
+              systemPrompt,
+              TOOL_DEFINITIONS,
+              maxTokens,
+              emit
+            )
 
-          if (toolCalls.length > 0) {
-            const responseParts = await Promise.all(
-              toolCalls.map(async (toolCall) => ({
-                functionResponse: {
-                  name: toolCall.name,
-                  id: toolCall.id,
-                  response: {
-                    result: await executeToolCall(
-                      { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
-                      supabase,
-                      user.id
-                    )
+            if (toolCalls.length > 0) {
+              const responseParts = await Promise.all(
+                toolCalls.map(async (toolCall) => ({
+                  functionResponse: {
+                    name: toolCall.name,
+                    id: toolCall.id,
+                    response: {
+                      result: await executeToolCall(
+                        { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
+                        supabase,
+                        user.id
+                      )
+                    }
                   }
-                }
-              }))
-            )
-
-            const followUpContents: GeminiContent[] = [
-              ...geminiContents,
-              { role: 'model', parts: modelParts },
-              { role: 'user', parts: responseParts }
-            ]
-
-            // Bounded to exactly one tool round: no tools passed here, so
-            // the model has nothing left to call and must produce a reply
-            // — same shape as the Groq follow-up round below.
-            await streamGeminiRound(followUpContents, systemPrompt, undefined, maxTokens, emit)
-          }
-        } else if (usesVision) {
-          // Groq's vision model (VISION_MODEL) doesn't reliably support
-          // real structured tool-calling alongside image content —
-          // verified live: given an image + a question needing a web
-          // lookup (e.g. "what's the price of this watch"), it wrote a
-          // literal `<tool_call>...</tool_call>`-shaped string into the
-          // visible reply instead of actually invoking search_web via the
-          // API's real function-calling mechanism. Split into two rounds
-          // instead: the vision model first produces a grounded,
-          // question-aware description of the image (no tools offered,
-          // nothing streamed to the user yet — this round is perception
-          // only), then the normal text model — which reliably handles
-          // tool-calling everywhere else in this app — answers the user's
-          // actual question using that description as context, with full
-          // tool access including search_web.
-          // Dedicated extraction-focused prompt for this internal round —
-          // deliberately separate from the global Sofii personality prompt,
-          // since this reply is never shown to the user. Explicitly asks
-          // for verbatim text (brand/model markings on the object itself,
-          // not just surrounding UI chrome) and concrete specs, so round 2
-          // has enough to search on rather than a vague visual summary.
-          const IMAGE_ANALYSIS_SYSTEM_PROMPT =
-            "Carefully analyze the attached image and describe it factually and thoroughly. Extract and transcribe ALL visible text exactly as shown — including text printed or engraved on an object itself (e.g. brand name, model/collection name, model number, specs on a product's face or packaging), not just surrounding UI text. If the image shows a product, explicitly identify: brand, model/collection name, model number, category, and any visible specifications (materials, size, capacity, movement type, water resistance, etc.). Be precise and complete — this description is used to research the product further, so don't omit details."
-          const imageAnalysisMessages: ChatCompletionMessageParam[] = [
-            { role: 'system', content: IMAGE_ANALYSIS_SYSTEM_PROMPT },
-            ...conversationMessages.map(
-              (m, i) =>
-                ({
-                  role: m.role,
-                  content: toContentParam(m, i === conversationMessages.length - 1)
-                }) as ChatCompletionMessageParam
-            )
-          ]
-
-          let imageDescription = ''
-          await streamOneRound(imageAnalysisMessages, {}, groqModel, (delta) => {
-            imageDescription += delta
-          })
-
-          const textModel = { name: getGroqModel(), maxTokens: 1024, reasoning: SUPPRESS_REASONING }
-          const descriptionSystemPrompt = `${systemPrompt}\n\nThe user's message included an image. Here is a factual description of what it shows, including any text extracted from it:\n${imageDescription}\n\nIf the user is asking about a product shown in the image (price, specs, or purchase info), don't just look up that exact product: also proactively search for and mention 2-3 comparable competing products in a similar price range with similar specifications, so the user can compare options, not just find the same item at different sellers.`
-          const textOnlyMessages: ChatCompletionMessageParam[] = [
-            { role: 'system', content: descriptionSystemPrompt },
-            ...conversationMessages.map(
-              (m) => ({ role: m.role, content: toContentParam(m, false) }) as ChatCompletionMessageParam
-            )
-          ]
-
-          const toolCalls = await streamOneRound(
-            textOnlyMessages,
-            { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
-            textModel,
-            emit
-          )
-
-          if (toolCalls.length > 0) {
-            const toolResultMessages: ChatCompletionMessageParam[] = await Promise.all(
-              toolCalls.map(async (toolCall) => ({
-                role: 'tool' as const,
-                tool_call_id: toolCall.id,
-                content: await executeToolCall(
-                  { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
-                  supabase,
-                  user.id
-                )
-              }))
-            )
-
-            const followUpMessages: ChatCompletionMessageParam[] = [
-              ...textOnlyMessages,
-              {
-                role: 'assistant',
-                content: fullContent || null,
-                tool_calls: toolCalls.map((toolCall) => ({
-                  id: toolCall.id,
-                  type: 'function',
-                  function: { name: toolCall.name, arguments: toolCall.argumentsJson }
                 }))
-              },
-              ...toolResultMessages
+              )
+
+              const followUpContents: GeminiContent[] = [
+                ...geminiContents,
+                { role: 'model', parts: modelParts },
+                { role: 'user', parts: responseParts }
+              ]
+
+              // Bounded to exactly one tool round: no tools passed here, so
+              // the model has nothing left to call and must produce a reply
+              // — same shape as the Groq follow-up round below.
+              await streamGeminiRound(followUpContents, systemPrompt, undefined, maxTokens, emit)
+            }
+          } catch (geminiError) {
+            const message = geminiError instanceof Error ? geminiError.message : String(geminiError)
+            const isQuotaError = /RESOURCE_EXHAUSTED|429|quota/i.test(message)
+            // Only fall back before anything has streamed yet — a failure
+            // mid-reply after real content already reached the client
+            // should surface as an error, not silently restart with a
+            // different model partway through.
+            if (isQuotaError && !fullContent) {
+              console.error('Gemini quota exceeded, falling back to Groq for this turn:', message)
+              emit("_Gemini's free daily limit was reached — answering with Groq instead._\n\n")
+              useGroqFallback = true
+            } else {
+              throw geminiError
+            }
+          }
+        }
+
+        if (selectedModel !== 'gemini' || useGroqFallback) {
+          if (usesVision) {
+            // Groq's vision model (VISION_MODEL) doesn't reliably support
+            // real structured tool-calling alongside image content —
+            // verified live: given an image + a question needing a web
+            // lookup (e.g. "what's the price of this watch"), it wrote a
+            // literal `<tool_call>...</tool_call>`-shaped string into the
+            // visible reply instead of actually invoking search_web via the
+            // API's real function-calling mechanism. Split into two rounds
+            // instead: the vision model first produces a grounded,
+            // question-aware description of the image (no tools offered,
+            // nothing streamed to the user yet — this round is perception
+            // only), then the normal text model — which reliably handles
+            // tool-calling everywhere else in this app — answers the user's
+            // actual question using that description as context, with full
+            // tool access including search_web.
+            // Dedicated extraction-focused prompt for this internal round —
+            // deliberately separate from the global Sofii personality prompt,
+            // since this reply is never shown to the user. Explicitly asks
+            // for verbatim text (brand/model markings on the object itself,
+            // not just surrounding UI chrome) and concrete specs, so round 2
+            // has enough to search on rather than a vague visual summary.
+            const IMAGE_ANALYSIS_SYSTEM_PROMPT =
+              "Carefully analyze the attached image and describe it factually and thoroughly. Extract and transcribe ALL visible text exactly as shown — including text printed or engraved on an object itself (e.g. brand name, model/collection name, model number, specs on a product's face or packaging), not just surrounding UI text. If the image shows a product, explicitly identify: brand, model/collection name, model number, category, and any visible specifications (materials, size, capacity, movement type, water resistance, etc.). Be precise and complete — this description is used to research the product further, so don't omit details."
+            const imageAnalysisMessages: ChatCompletionMessageParam[] = [
+              { role: 'system', content: IMAGE_ANALYSIS_SYSTEM_PROMPT },
+              ...conversationMessages.map(
+                (m, i) =>
+                  ({
+                    role: m.role,
+                    content: toContentParam(m, i === conversationMessages.length - 1)
+                  }) as ChatCompletionMessageParam
+              )
             ]
 
-            await streamOneRound(followUpMessages, {}, textModel, emit)
-          }
-        } else {
-          const toolCalls = await streamOneRound(
-            baseMessages,
-            { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
-            groqModel,
-            emit
-          )
+            let imageDescription = ''
+            await streamOneRound(imageAnalysisMessages, {}, groqModel, (delta) => {
+              imageDescription += delta
+            })
 
-          if (toolCalls.length > 0) {
-            // Independent tool calls run concurrently rather than one at a time.
-            const toolResultMessages: ChatCompletionMessageParam[] = await Promise.all(
-              toolCalls.map(async (toolCall) => ({
-                role: 'tool' as const,
-                tool_call_id: toolCall.id,
-                content: await executeToolCall(
-                  { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
-                  supabase,
-                  user.id
-                )
-              }))
+            const textModel = {
+              name: getGroqModel(),
+              maxTokens: 1024,
+              reasoning: SUPPRESS_REASONING
+            }
+            const descriptionSystemPrompt = `${systemPrompt}\n\nThe user's message included an image. Here is a factual description of what it shows, including any text extracted from it:\n${imageDescription}\n\nIf the user is asking about a product shown in the image (price, specs, or purchase info), don't just look up that exact product: also proactively search for and mention 2-3 comparable competing products in a similar price range with similar specifications, so the user can compare options, not just find the same item at different sellers.`
+            const textOnlyMessages: ChatCompletionMessageParam[] = [
+              { role: 'system', content: descriptionSystemPrompt },
+              ...conversationMessages.map(
+                (m) =>
+                  ({
+                    role: m.role,
+                    content: toContentParam(m, false)
+                  }) as ChatCompletionMessageParam
+              )
+            ]
+
+            const toolCalls = await streamOneRound(
+              textOnlyMessages,
+              { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
+              textModel,
+              emit
             )
 
-            const followUpMessages: ChatCompletionMessageParam[] = [
-              ...baseMessages,
-              {
-                role: 'assistant',
-                content: fullContent || null,
-                tool_calls: toolCalls.map((toolCall) => ({
-                  id: toolCall.id,
-                  type: 'function',
-                  function: { name: toolCall.name, arguments: toolCall.argumentsJson }
+            if (toolCalls.length > 0) {
+              const toolResultMessages: ChatCompletionMessageParam[] = await Promise.all(
+                toolCalls.map(async (toolCall) => ({
+                  role: 'tool' as const,
+                  tool_call_id: toolCall.id,
+                  content: await executeToolCall(
+                    { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
+                    supabase,
+                    user.id
+                  )
                 }))
-              },
-              ...toolResultMessages
-            ]
+              )
 
-            // Bounded to exactly one tool round: no `tools` option here, so
-            // the model has nothing left to call and must produce a reply.
-            await streamOneRound(followUpMessages, {}, groqModel, emit)
+              const followUpMessages: ChatCompletionMessageParam[] = [
+                ...textOnlyMessages,
+                {
+                  role: 'assistant',
+                  content: fullContent || null,
+                  tool_calls: toolCalls.map((toolCall) => ({
+                    id: toolCall.id,
+                    type: 'function',
+                    function: { name: toolCall.name, arguments: toolCall.argumentsJson }
+                  }))
+                },
+                ...toolResultMessages
+              ]
+
+              await streamOneRound(followUpMessages, {}, textModel, emit)
+            }
+          } else {
+            const toolCalls = await streamOneRound(
+              baseMessages,
+              { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
+              groqModel,
+              emit
+            )
+
+            if (toolCalls.length > 0) {
+              // Independent tool calls run concurrently rather than one at a time.
+              const toolResultMessages: ChatCompletionMessageParam[] = await Promise.all(
+                toolCalls.map(async (toolCall) => ({
+                  role: 'tool' as const,
+                  tool_call_id: toolCall.id,
+                  content: await executeToolCall(
+                    { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
+                    supabase,
+                    user.id
+                  )
+                }))
+              )
+
+              const followUpMessages: ChatCompletionMessageParam[] = [
+                ...baseMessages,
+                {
+                  role: 'assistant',
+                  content: fullContent || null,
+                  tool_calls: toolCalls.map((toolCall) => ({
+                    id: toolCall.id,
+                    type: 'function',
+                    function: { name: toolCall.name, arguments: toolCall.argumentsJson }
+                  }))
+                },
+                ...toolResultMessages
+              ]
+
+              // Bounded to exactly one tool round: no `tools` option here, so
+              // the model has nothing left to call and must produce a reply.
+              await streamOneRound(followUpMessages, {}, groqModel, emit)
+            }
           }
         }
       } catch (error) {

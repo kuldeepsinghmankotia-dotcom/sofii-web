@@ -144,7 +144,7 @@ export default function AskDocuments({
           onClick={() => void handleAsk()}
           disabled={loading || !query.trim() || !serviceOnline}
           aria-label="Ask"
-          className="shrink-0 rounded-lg px-4 py-2 text-black disabled:opacity-60"
+          className="shrink-0 rounded-lg px-4 py-2 text-[var(--accent-gradient-text)] disabled:opacity-60"
           style={{ background: 'var(--accent-gradient)' }}
         >
           {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}

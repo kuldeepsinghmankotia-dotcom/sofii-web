@@ -64,7 +64,7 @@ export default function HomePage() {
         className="h-16 w-16 rounded-full opacity-90 blur-[1px]"
         style={{
           background: 'var(--accent-gradient)',
-          boxShadow: '0 0 60px rgba(139, 92, 246, 0.35)'
+          boxShadow: 'var(--avatar-glow-lg)'
         }}
       />
       <h1 className="font-display accent-text text-2xl tracking-wide">SOFII</h1>
@@ -84,7 +84,7 @@ export default function HomePage() {
           onClick={() => void start(input)}
           disabled={creating}
           aria-label="Send message"
-          className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium text-black disabled:opacity-60"
+          className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium text-[var(--accent-gradient-text)] disabled:opacity-60"
           style={{ background: 'var(--accent-gradient)' }}
         >
           {creating ? '…' : <Send size={14} />}

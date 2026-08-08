@@ -49,7 +49,7 @@ export default function SystemPromptForm({ initialContent }: { initialContent: s
         <button
           onClick={() => void handleSave()}
           disabled={saving || !dirty}
-          className="rounded-lg px-5 py-2.5 text-sm font-medium text-black disabled:opacity-60"
+          className="rounded-lg px-5 py-2.5 text-sm font-medium text-[var(--accent-gradient-text)] disabled:opacity-60"
           style={{ background: 'var(--accent-gradient)' }}
         >
           {saving ? 'Saving…' : 'Save'}

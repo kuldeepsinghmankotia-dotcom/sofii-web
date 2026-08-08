@@ -209,7 +209,7 @@ export default function DocumentList({
     <div>
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <label
-          className="inline-flex cursor-pointer items-center gap-2 rounded-lg px-5 py-3 font-medium text-black disabled:opacity-60"
+          className="inline-flex cursor-pointer items-center gap-2 rounded-lg px-5 py-3 font-medium text-[var(--accent-gradient-text)] disabled:opacity-60"
           style={{ background: 'var(--accent-gradient)' }}
         >
           <Upload size={15} />

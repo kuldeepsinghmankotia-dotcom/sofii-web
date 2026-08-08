@@ -280,20 +280,22 @@ export default function Sidebar({
           </button>
         </div>
 
-        <div className="accent-ring relative shrink-0 rounded-xl px-3 pb-3">
-          <Search
-            size={14}
-            className="pointer-events-none absolute top-1/2 left-6 -translate-y-1/2 text-[var(--text-muted)]"
-          />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search chats"
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-input)] py-1.5 pr-12 pl-8 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
-          />
-          <kbd className="pointer-events-none absolute top-1/2 right-5 -translate-y-1/2 rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]">
-            ⌘K
-          </kbd>
+        <div className="accent-ring shrink-0 px-3 pb-3">
+          <div className="relative rounded-xl">
+            <Search
+              size={14}
+              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-[var(--text-muted)]"
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search chats"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-input)] py-1.5 pr-12 pl-8 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+            />
+            <kbd className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]">
+              ⌘K
+            </kbd>
+          </div>
         </div>
 
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">

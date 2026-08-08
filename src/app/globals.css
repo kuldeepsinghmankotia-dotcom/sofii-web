@@ -19,6 +19,27 @@
   --danger: #f87171;
   --background: var(--bg);
   --foreground: var(--text);
+  /* The user's own chat bubble: the vivid full-strength accent-gradient
+     reads fine with black text against this theme's near-black page (high
+     contrast, and it's the brightest thing on screen only in a good way).
+     Light theme overrides this below — the same vivid gradient on a white
+     page is a much larger contrast jump and reads as visually loud over a
+     whole paragraph of text, not just a button. */
+  --user-bubble-bg: var(--accent-gradient);
+  --user-bubble-text: #000;
+  /* Text color for anything sitting directly on --accent-gradient (Send,
+     New chat, Save & submit, etc.). Dark theme's accent colors are bright
+     against a near-black page, so black text is the right call there. */
+  --accent-gradient-text: #000;
+  /* The Sofii avatar's glow (home hero + per-message avatar) was
+     previously a literal rgba(139,92,246,...) box-shadow — the dark
+     theme's own --accent-b, hardcoded rather than themed, so light mode
+     inherited a glow tuned for a near-black backdrop. Kept as its own
+     token rather than reusing --shadow-glow-b: that one's a fixed 24px
+     blur shared by several surfaces, while these two need their own
+     blur radius (60px hero / 14px message avatar) matched to their size. */
+  --avatar-glow-lg: 0 0 60px rgba(139, 92, 246, 0.35);
+  --avatar-glow-sm: 0 0 14px rgba(139, 92, 246, 0.45);
 
   --radius-sm: 0.5rem;
   --radius-md: 0.75rem;
@@ -74,6 +95,11 @@
   --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.12);
   --shadow-glow-a: 0 0 20px rgba(8, 145, 178, 0.12);
   --shadow-glow-b: 0 0 24px rgba(124, 58, 237, 0.14);
+  /* Same softening ratio already used above for --shadow-glow-b
+     (dark 0.18 -> light 0.14): a glow tuned for a near-black backdrop
+     reads as a muddy purple smudge at full strength on white. */
+  --avatar-glow-lg: 0 0 60px rgba(124, 58, 237, 0.16);
+  --avatar-glow-sm: 0 0 14px rgba(124, 58, 237, 0.2);
 
   --surface-subtle: rgba(15, 23, 42, 0.03);
   --surface-hover: rgba(15, 23, 42, 0.04);
@@ -81,6 +107,21 @@
   --surface-active: rgba(15, 23, 42, 0.06);
   --surface-button-hover: rgba(15, 23, 42, 0.08);
   --surface-input: rgba(15, 23, 42, 0.04);
+  /* A soft tint instead of the full-strength vivid gradient: black text on
+     the saturated violet end of the dark theme's gradient is fine against
+     near-black surroundings, but the same combination on a white page is
+     both a harsher jump in contrast and, over a full paragraph of text
+     rather than a button label, visibly straining to read. Dark text on a
+     pale tint reads the same way the rest of this theme's surfaces do. */
+  --user-bubble-bg: linear-gradient(135deg, rgba(8, 145, 178, 0.16), rgba(124, 58, 237, 0.16));
+  --user-bubble-text: var(--text);
+  /* Light theme's accent colors (--accent-a/--accent-b above) are darker
+     and more saturated than dark theme's, specifically so the gradient
+     still reads as vivid against a white page — but that means black text
+     no longer has reliable contrast across the whole gradient (verified:
+     black-on-violet #7c3aed is ~2.8:1, under WCAG AA's 3:1 floor even for
+     large bold button text). White clears it on both ends of the gradient. */
+  --accent-gradient-text: #fff;
   --surface-input-strong: rgba(15, 23, 42, 0.06);
 }
 

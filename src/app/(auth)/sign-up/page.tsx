@@ -64,7 +64,7 @@ export default function SignUpPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-lg p-3 font-medium text-black disabled:opacity-60"
+          className="w-full rounded-lg p-3 font-medium text-[var(--accent-gradient-text)] disabled:opacity-60"
           style={{ background: 'var(--accent-gradient)' }}
         >
           {loading ? 'Creating account…' : 'Sign up'}
