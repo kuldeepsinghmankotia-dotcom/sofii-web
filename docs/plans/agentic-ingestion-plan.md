@@ -35,6 +35,15 @@
 >   not intentional, protection). Any future `service_role`-only function
 >   needs an explicit `revoke execute ... from public` in the same
 >   migration that creates it, not as an afterthought.
+> - **`revoke ... from public` is not enough on Supabase Cloud specifically**
+>   — the hosted platform has its own `ALTER DEFAULT PRIVILEGES` rule that
+>   grants `EXECUTE` to `anon`/`authenticated` individually on every new
+>   function, bypassing `PUBLIC` entirely. Local `supabase start` doesn't
+>   have this rule, so a local-only grants check can pass while production
+>   is still wide open. Always `revoke ... from anon, authenticated`
+>   explicitly by name, and **verify any grants/RLS security fix against
+>   the actual production database**, not just local — local passing is
+>   not sufficient evidence.
 >
 > **Admin account** was changed after Phase 1 shipped: it's
 > `kuldeepsinghmankotia@gmail.com`, not `amit21aim@gmail.com` as written
@@ -640,7 +649,8 @@ successfully — the fire-and-forget design proven live yet again.
   `20260808150000_revoke_public_service_rpc.sql`
   (`revoke execute ... from public`); re-verified live afterward:
   `authenticated` now gets a real `42501`/403 `permission denied`,
-  `service_role` is unaffected.
+  `service_role` is unaffected. **This fix was itself incomplete on
+  production** — see the note below.
 - Full RLS/grants audit performed with two real `authenticated` JWTs
   (via GoTrue's password grant, not just service-role assumptions):
   `documents` (self-insert succeeds, insert claiming another user's
@@ -664,7 +674,28 @@ successfully — the fire-and-forget design proven live yet again.
   to `status='failed'`, `error_message='Ingestion timed out'` — not just
   that the code looks right, that the actual page load did it.
 
-All 10 phases of this plan are now done and verified for real.
+**Post-deploy correction**: pushing migrations to the real production
+Supabase project surfaced that the `revoke execute ... from public`
+fix above was **incomplete on the hosted platform**. Verified live against
+production directly: after that migration, `authenticated` *still* had
+`EXECUTE` on `match_document_chunks_for_service`. Cause: Supabase Cloud
+projects carry their own `ALTER DEFAULT PRIVILEGES` rule (owned by
+`supabase_admin`) that auto-grants `EXECUTE` on every new public-schema
+function directly to `anon`/`authenticated`/`service_role` as individual
+grants — not through `PUBLIC` — so a `revoke ... from public` alone never
+touches them. Local `supabase start` doesn't reproduce this rule, which is
+exactly why the local-only verification above looked complete but wasn't.
+Fixed for real in migration
+`20260808160000_revoke_anon_authenticated_service_rpc.sql`
+(`revoke execute ... from anon, authenticated`, explicitly by name), and
+this time verified against the **actual production** database — created a
+real throwaway user there, got a real JWT, called the RPC: `403 permission
+denied`. Lesson for any future `service_role`-only function: verifying
+against local Supabase is not sufficient proof for a grants/RLS claim;
+verify against the real hosted project before calling a security fix done.
+
+All 10 phases of this plan are now done and verified for real, including
+against the actual production database, not just local.
 
 ---
 

@@ -1,0 +1,14 @@
+-- Follow-up to 20260808150000_revoke_public_service_rpc.sql: that
+-- migration revoked EXECUTE from PUBLIC, which is correct on plain
+-- Postgres but turned out to be insufficient on Supabase's hosted
+-- platform. Verified live against production: after the PUBLIC revoke,
+-- `anon` and `authenticated` still had EXECUTE individually. Cause:
+-- Supabase Cloud projects carry their own `ALTER DEFAULT PRIVILEGES`
+-- rule (owned by supabase_admin) that auto-grants EXECUTE on every new
+-- public-schema function directly to anon/authenticated/service_role, as
+-- individual grants, not through PUBLIC — so revoking from PUBLIC alone
+-- never touched them. Local `supabase start` does not reproduce this
+-- default-privilege rule, which is why the earlier fix looked complete
+-- when verified only against local. Revoking explicitly from both roles
+-- here closes the actual gap on the platform that matters.
+revoke execute on function public.match_document_chunks_for_service (vector, uuid, int, text) from anon, authenticated;
