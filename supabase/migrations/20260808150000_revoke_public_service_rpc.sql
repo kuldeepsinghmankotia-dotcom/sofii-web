@@ -1,0 +1,14 @@
+-- Phase 10 RLS/grants audit finding: PostgreSQL grants EXECUTE on a new
+-- function to PUBLIC by default, and the migration that created
+-- match_document_chunks_for_service only ADDED a grant to service_role —
+-- it never revoked the implicit PUBLIC one. Verified live: an
+-- `authenticated` role could call it with an arbitrary target_user_id and
+-- get HTTP 200 (not 403). It happened to return no data in that test only
+-- because the function isn't SECURITY DEFINER, so document_chunks' own
+-- RLS policy (scoped to auth.uid()) still applied underneath it — that's
+-- incidental protection, not the documented security model ("granted
+-- ONLY to service_role"), and would silently disappear if this function
+-- were ever changed to SECURITY DEFINER for a performance reason without
+-- revisiting this. Revoking PUBLIC explicitly makes the intended
+-- boundary real, not just commented.
+revoke execute on function public.match_document_chunks_for_service (vector, uuid, int, text) from public;

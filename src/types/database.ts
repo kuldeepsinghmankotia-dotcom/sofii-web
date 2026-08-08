@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.15"
-  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -131,6 +126,8 @@ export type Database = {
           document_id: string
           embedding: string | null
           id: string
+          metadata: Json
+          modality: string
           user_id: string
         }
         Insert: {
@@ -140,6 +137,8 @@ export type Database = {
           document_id: string
           embedding?: string | null
           id?: string
+          metadata?: Json
+          modality?: string
           user_id: string
         }
         Update: {
@@ -149,6 +148,8 @@ export type Database = {
           document_id?: string
           embedding?: string | null
           id?: string
+          metadata?: Json
+          modality?: string
           user_id?: string
         }
         Relationships: [
@@ -166,21 +167,71 @@ export type Database = {
           created_at: string
           filename: string
           id: string
+          ingested_by: string
+          metadata: Json
+          source_type: string
           user_id: string
         }
         Insert: {
           created_at?: string
           filename: string
           id?: string
+          ingested_by?: string
+          metadata?: Json
+          source_type?: string
           user_id: string
         }
         Update: {
           created_at?: string
           filename?: string
           id?: string
+          ingested_by?: string
+          metadata?: Json
+          source_type?: string
           user_id?: string
         }
         Relationships: []
+      }
+      ingestion_jobs: {
+        Row: {
+          created_at: string
+          document_id: string | null
+          error_message: string | null
+          filename: string
+          id: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          document_id?: string | null
+          error_message?: string | null
+          filename: string
+          id?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          document_id?: string | null
+          error_message?: string | null
+          filename?: string
+          id?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ingestion_jobs_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       memories: {
         Row: {
@@ -382,7 +433,25 @@ export type Database = {
         Returns: undefined
       }
       match_document_chunks: {
-        Args: { match_count?: number; query_embedding: string }
+        Args: {
+          match_count?: number
+          modality_filter?: string
+          query_embedding: string
+        }
+        Returns: {
+          content: string
+          document_id: string
+          id: string
+          similarity: number
+        }[]
+      }
+      match_document_chunks_for_service: {
+        Args: {
+          match_count?: number
+          modality_filter?: string
+          query_embedding: string
+          target_user_id: string
+        }
         Returns: {
           content: string
           document_id: string
@@ -525,3 +594,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

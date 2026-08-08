@@ -27,6 +27,36 @@ export async function hasAnyDocuments(supabase: Client): Promise<boolean> {
   return (count ?? 0) > 0
 }
 
+export async function getDocument(
+  supabase: Client,
+  id: string
+): Promise<DocumentSummary | null> {
+  const { data, error } = await supabase
+    .from('documents')
+    .select('id, filename, created_at')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (error) throw error
+  return data
+}
+
+// Populated only for image documents that went through the OCR ensemble
+// (Phase 6) — true when Gemini and Ollama's transcriptions disagreed
+// enough that cross_validate() didn't silently pick one.
+export async function getDocumentOcrFlag(supabase: Client, documentId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('document_chunks')
+    .select('metadata')
+    .eq('document_id', documentId)
+    .order('chunk_index')
+    .limit(1)
+
+  if (error) throw error
+  const metadata = data[0]?.metadata as { ocr_flagged_for_review?: boolean } | null
+  return metadata?.ocr_flagged_for_review === true
+}
+
 export async function listDocuments(supabase: Client): Promise<DocumentSummary[]> {
   const { data, error } = await supabase
     .from('documents')

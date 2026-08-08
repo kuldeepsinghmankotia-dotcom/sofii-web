@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Sparkles, X } from 'lucide-react'
+import { FileText, Sparkles, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { createMemory, deleteMemory, updateMemory, type Memory } from '@/lib/db/memories'
 import { Tooltip } from '../tooltip'
@@ -149,6 +149,15 @@ export default function MemoryList({ initialMemories }: { initialMemories: Memor
                 >
                   <Sparkles size={11} className="accent-icon" />
                   Auto-detected
+                </span>
+              )}
+              {memory.source === 'document' && (
+                <span
+                  className="model-badge"
+                  title="Sofii extracted this from a document you uploaded"
+                >
+                  <FileText size={11} className="accent-icon" />
+                  From a document
                 </span>
               )}
               <span>{usageLabel(memory)}</span>

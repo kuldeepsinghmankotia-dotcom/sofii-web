@@ -3,7 +3,7 @@ import type { Database } from '@/types/database'
 
 type Client = SupabaseClient<Database>
 
-export type MemorySource = 'manual' | 'auto'
+export type MemorySource = 'manual' | 'auto' | 'document'
 
 export interface Memory {
   id: string
