@@ -697,6 +697,27 @@ verify against the real hosted project before calling a security fix done.
 All 10 phases of this plan are now done and verified for real, including
 against the actual production database, not just local.
 
+## Deployed to production
+
+`INGEST_SERVICE_URL`/`INGEST_SERVICE_SECRET` added to Vercel production
+env, all 7 migrations pushed to the real Supabase project, and the app
+deployed (`vercel --prod`, live at `sofii-web.vercel.app`). One real
+deployment-topology bug found and fixed immediately: this Python service's
+`.env` was still pointed at **local** Supabase from Phase 2 setup — a real
+production upload correctly wrote the file/job to production Storage/DB
+via the Next.js proxy, but this service (the only instance, shared by
+whichever environment points its tunnel URL at it) tried to read them
+from local Postgres/Storage and got `Object not found`. Fixed by pointing
+this service's `.env` at the production project; documented properly in
+`services/ingestion-agent/README.md` since it's a standing operational
+constraint (one instance, one Supabase project at a time), not a one-off
+mistake. Re-verified after the fix with a full real round trip against
+the live production site: real signup, real `.txt` upload through the
+actual deployed UI, ingestion completed, and a chat question answered
+correctly (`ZEBRA-4471-QUARTZ`) — proving the entire chain (browser →
+Vercel production → Cloudflare tunnel → this Mac → production Supabase →
+back to a correct answer) for real, not just each piece in isolation.
+
 ---
 
 ## Cross-cutting verification checklist

@@ -6,6 +6,34 @@ a separate query-time agent layer. See `docs/plans/agentic-ingestion-plan.md`
 at the repo root for the full phased plan and what's been verified at each
 phase — all 10 phases are done as of this writing.
 
+## ⚠️ One service instance, one Supabase project at a time
+
+This service's `.env` points at exactly one Supabase project
+(`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`). There's only one instance of
+this service running (on your Mac, behind the Cloudflare Tunnel), and
+**whichever Vercel deployment currently has `INGEST_SERVICE_URL` pointed
+at that tunnel will have its ingest/query requests processed against
+whatever Supabase project this `.env` currently points at** — regardless
+of which Supabase project that deployment's own `NEXT_PUBLIC_SUPABASE_URL`
+uses. Verified live: pointing this service at local Supabase while Vercel
+**production** was live caused every real production upload to fail with
+`Object not found` (the Next.js proxy correctly wrote to production
+Storage/`ingestion_jobs`; this service tried to read them from local
+Postgres/Storage, which never had them). Fixed by pointing this service's
+`.env` at the production project instead.
+
+Practical upshot: decide who this service is currently serving.
+- **Serving local dev**: `SUPABASE_URL=http://127.0.0.1:54321` +
+  the local service-role key from `supabase status`.
+- **Serving Vercel production**: the real project's URL +
+  service-role key (same values as Vercel's `SUPABASE_SERVICE_ROLE_KEY`
+  env var). Restart uvicorn after switching either way — it reads `.env`
+  once at startup.
+- Running both simultaneously needs two separate instances (different
+  ports, different tunnels, different `INGEST_SERVICE_URL` values set on
+  the respective Next.js environments) — not set up here, since this
+  project runs as a single Mac-hosted service today.
+
 ## Dependencies
 
 - Python 3.12+ (`brew install python@3.12`) and [`uv`](https://github.com/astral-sh/uv) (`brew install uv`)
