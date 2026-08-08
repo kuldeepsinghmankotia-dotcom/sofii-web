@@ -14,11 +14,14 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { toast } from 'sonner'
 import {
   ArrowDown,
+  BookmarkPlus,
   Camera,
+  Check,
   Download,
   ImagePlus,
   Link2,
   Link2Off,
+  Loader2,
   Mic,
   MoreHorizontal,
   Pencil,
@@ -178,6 +181,8 @@ export default function ChatWindow({
     previewUrl: string
   } | null>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [savingImageIds, setSavingImageIds] = useState<Set<string>>(new Set())
+  const [savedImageIds, setSavedImageIds] = useState<Set<string>>(new Set())
   const [micStream, setMicStream] = useState<MediaStream | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -396,6 +401,36 @@ export default function ChatWindow({
 
   const handleStop = (): void => {
     abortControllerRef.current?.abort()
+  }
+
+  // Feeds an already-uploaded chat image into the real ingestion/OCR
+  // pipeline (the same one Documents page uploads go through) so it
+  // becomes a searchable document instead of living only in this one
+  // conversation's context. Chat images sit in the public chat-images
+  // bucket, so their URL works with /api/ingest's URL-ingestion path
+  // unchanged — no new upload, just handing over the existing public URL.
+  const saveImageAsDocument = async (messageId: string, imageUrl: string): Promise<void> => {
+    setSavingImageIds((prev) => new Set(prev).add(messageId))
+    try {
+      const response = await fetch('/api/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: imageUrl })
+      })
+      if (!response.ok) throw new Error(await response.text())
+
+      setSavedImageIds((prev) => new Set(prev).add(messageId))
+      toast.success('Saved to Documents — searchable in chat and on the Documents page shortly.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error(`Could not save image as a document: ${message}`)
+    } finally {
+      setSavingImageIds((prev) => {
+        const next = new Set(prev)
+        next.delete(messageId)
+        return next
+      })
+    }
   }
 
   // Deletes the current reply and asks the server for a fresh one from the
@@ -998,12 +1033,37 @@ export default function ChatWindow({
                   <div className="flex max-w-[85%] items-start gap-2.5 sm:max-w-[70%]">
                     <div className="min-w-0 flex-1">
                       {m.image_url && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={m.image_url}
-                          alt="Attached"
-                          className="mb-2 ml-auto max-h-64 max-w-full rounded-lg object-contain"
-                        />
+                        <div className="mb-2 ml-auto w-fit">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={m.image_url}
+                            alt="Attached"
+                            className="max-h-64 max-w-full rounded-lg object-contain"
+                          />
+                          <Tooltip
+                            label={
+                              savedImageIds.has(m.id)
+                                ? 'Saved to Documents'
+                                : 'Save this image as a document — searchable later, goes through OCR'
+                            }
+                          >
+                            <button
+                              onClick={() => void saveImageAsDocument(m.id, m.image_url!)}
+                              disabled={savingImageIds.has(m.id) || savedImageIds.has(m.id)}
+                              aria-label="Save image as document"
+                              className="mt-1 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-button-hover)] hover:text-[var(--text)] disabled:opacity-60"
+                            >
+                              {savingImageIds.has(m.id) ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : savedImageIds.has(m.id) ? (
+                                <Check size={12} />
+                              ) : (
+                                <BookmarkPlus size={12} />
+                              )}
+                              {savedImageIds.has(m.id) ? 'Saved' : 'Save as document'}
+                            </button>
+                          </Tooltip>
+                        </div>
                       )}
                       {editingId === m.id ? (
                         <div className="rounded-2xl rounded-tr-sm border border-[var(--border-strong)] bg-[var(--surface-input-strong)] p-2">

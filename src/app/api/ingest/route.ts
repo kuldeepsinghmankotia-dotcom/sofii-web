@@ -98,10 +98,25 @@ async function startIngestionJob(
 
 // Filename derived from the URL for display purposes only — sanitized to
 // a safe, bounded set of characters since it flows into a Storage path.
-function filenameFromUrl(url: URL): string {
+function filenameFromUrl(url: URL, extension: string): string {
   const raw = `${url.hostname}${url.pathname}`.replace(/\/+$/, '') || url.hostname
   const safe = raw.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 80)
-  return `${safe}.html`
+  return `${safe}.${extension}`
+}
+
+// image/* is allowed here too — beyond generic image URLs, this is how
+// chat's "save this image as a document" action (chat-window.tsx) feeds an
+// already-analyzed chat image into the real OCR ingestion pipeline: chat
+// images live in the public chat-images bucket, so their URL is just
+// another public HTTPS URL from this endpoint's point of view, no
+// different from a user pasting any other image link.
+const INGESTIBLE_URL_CONTENT_TYPES: Record<string, string> = {
+  'text/html': 'html',
+  'text/plain': 'txt',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp'
 }
 
 async function handleUrlIngestion(request: NextRequest, supabase: Client, user: User): Promise<Response> {
@@ -124,31 +139,33 @@ async function handleUrlIngestion(request: NextRequest, supabase: Client, user: 
     return new Response(`That URL returned an error (status ${response.status})`, { status: 400 })
   }
 
-  const contentType = response.headers.get('content-type') ?? ''
-  if (!contentType.includes('text/html') && !contentType.includes('text/plain')) {
+  const contentType = (response.headers.get('content-type') ?? '').split(';')[0].trim()
+  const matchedType = Object.keys(INGESTIBLE_URL_CONTENT_TYPES).find((t) => contentType === t)
+
+  if (!matchedType) {
     return new Response(
-      'Only web pages (text/html) can be ingested by URL — upload other file types directly.',
+      'Only web pages and images can be ingested by URL — upload other file types directly.',
       { status: 400 }
     )
   }
 
   const contentLength = response.headers.get('content-length')
   if (contentLength && Number(contentLength) > MAX_FILE_BYTES) {
-    return new Response('That page is too large (max 4MB)', { status: 400 })
+    return new Response('That file is too large (max 4MB)', { status: 400 })
   }
 
   const buffer = Buffer.from(await response.arrayBuffer())
   if (buffer.byteLength > MAX_FILE_BYTES) {
-    return new Response('That page is too large (max 4MB)', { status: 400 })
+    return new Response('That file is too large (max 4MB)', { status: 400 })
   }
   if (buffer.byteLength === 0) {
-    return new Response('That page had no content', { status: 400 })
+    return new Response('That URL had no content', { status: 400 })
   }
 
   const finalUrl = new URL(response.url || rawUrl)
   return startIngestionJob(supabase, user, {
-    filename: filenameFromUrl(finalUrl),
-    mimeType: 'text/html',
+    filename: filenameFromUrl(finalUrl, INGESTIBLE_URL_CONTENT_TYPES[matchedType]),
+    mimeType: matchedType,
     bytes: buffer
   })
 }
