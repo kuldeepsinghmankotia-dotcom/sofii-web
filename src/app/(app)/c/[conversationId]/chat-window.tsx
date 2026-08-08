@@ -39,6 +39,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { resizeImageToJpeg } from '@/lib/image/resize'
 import { downloadConversationAsMarkdown } from '@/lib/export/markdown'
+import { detectSpeechLanguage, loadVoices, pickBestVoice } from '@/lib/voice/select-voice'
 import VoiceOrb from './voice-orb'
 import { CopyButton, ShareButton, AssistantContent } from './message-content'
 import { notifyConversationsChanged } from '../../sidebar'
@@ -282,23 +283,40 @@ export default function ChatWindow({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }, [input])
 
+  // Signature stays synchronous (callers fire-and-forget this, matching
+  // this file's established `void someAsyncCall()` convention elsewhere) —
+  // the voice lookup below is awaited internally instead.
   const speak = (text: string, onEnd?: () => void): void => {
     if (!speakEnabled || !text.trim()) {
       onEnd?.()
       return
     }
     window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(text)
-    // isSpeaking gates the wake-word listener below (see that effect) so it
-    // doesn't arm itself while Sofii's own voice is playing through the
-    // speakers — otherwise the mic could pick up her own reply and
-    // misinterpret it as containing the wake word.
-    setIsSpeaking(true)
-    utterance.onend = () => {
-      setIsSpeaking(false)
-      onEnd?.()
-    }
-    window.speechSynthesis.speak(utterance)
+
+    void (async () => {
+      const utterance = new SpeechSynthesisUtterance(text)
+      // Matches the utterance to an actual installed voice for whatever
+      // language it's speaking, instead of the browser's single unnamed
+      // default (previously never set at all — every reply, in every
+      // language, played through whichever voice the OS happened to
+      // default to, which is also often its lowest-quality one).
+      const lang = detectSpeechLanguage(text)
+      const voices = await loadVoices()
+      const voice = pickBestVoice(voices, lang)
+      utterance.lang = voice?.lang ?? lang
+      if (voice) utterance.voice = voice
+
+      // isSpeaking gates the wake-word listener below (see that effect) so
+      // it doesn't arm itself while Sofii's own voice is playing through
+      // the speakers — otherwise the mic could pick up her own reply and
+      // misinterpret it as containing the wake word.
+      setIsSpeaking(true)
+      utterance.onend = () => {
+        setIsSpeaking(false)
+        onEnd?.()
+      }
+      window.speechSynthesis.speak(utterance)
+    })()
   }
 
   // Shared by the gallery input, the camera input, and paste-from-clipboard
