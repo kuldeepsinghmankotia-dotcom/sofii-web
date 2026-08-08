@@ -428,13 +428,32 @@ export async function POST(request: NextRequest): Promise<Response> {
           // tool-calling everywhere else in this app — answers the user's
           // actual question using that description as context, with full
           // tool access including search_web.
+          // Dedicated extraction-focused prompt for this internal round —
+          // deliberately separate from the global Sofii personality prompt,
+          // since this reply is never shown to the user. Explicitly asks
+          // for verbatim text (brand/model markings on the object itself,
+          // not just surrounding UI chrome) and concrete specs, so round 2
+          // has enough to search on rather than a vague visual summary.
+          const IMAGE_ANALYSIS_SYSTEM_PROMPT =
+            "Carefully analyze the attached image and describe it factually and thoroughly. Extract and transcribe ALL visible text exactly as shown — including text printed or engraved on an object itself (e.g. brand name, model/collection name, model number, specs on a product's face or packaging), not just surrounding UI text. If the image shows a product, explicitly identify: brand, model/collection name, model number, category, and any visible specifications (materials, size, capacity, movement type, water resistance, etc.). Be precise and complete — this description is used to research the product further, so don't omit details."
+          const imageAnalysisMessages: ChatCompletionMessageParam[] = [
+            { role: 'system', content: IMAGE_ANALYSIS_SYSTEM_PROMPT },
+            ...conversationMessages.map(
+              (m, i) =>
+                ({
+                  role: m.role,
+                  content: toContentParam(m, i === conversationMessages.length - 1)
+                }) as ChatCompletionMessageParam
+            )
+          ]
+
           let imageDescription = ''
-          await streamOneRound(baseMessages, {}, groqModel, (delta) => {
+          await streamOneRound(imageAnalysisMessages, {}, groqModel, (delta) => {
             imageDescription += delta
           })
 
           const textModel = { name: getGroqModel(), maxTokens: 1024, reasoning: SUPPRESS_REASONING }
-          const descriptionSystemPrompt = `${systemPrompt}\n\nThe user's message included an image. Here is a factual description of what it shows:\n${imageDescription}`
+          const descriptionSystemPrompt = `${systemPrompt}\n\nThe user's message included an image. Here is a factual description of what it shows, including any text extracted from it:\n${imageDescription}\n\nIf the user is asking about a product shown in the image (price, specs, or purchase info), don't just look up that exact product: also proactively search for and mention 2-3 comparable competing products in a similar price range with similar specifications, so the user can compare options, not just find the same item at different sellers.`
           const textOnlyMessages: ChatCompletionMessageParam[] = [
             { role: 'system', content: descriptionSystemPrompt },
             ...conversationMessages.map(
