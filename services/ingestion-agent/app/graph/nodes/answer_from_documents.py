@@ -4,7 +4,7 @@ from app.clients import gemini_client, groq_client
 from app.clients.supabase_client import get_supabase
 from app.graph.query_state import Citation, QueryState
 
-SYNTHESIS_SYSTEM_PROMPT = """Answer the user's question using ONLY the provided document excerpts. Cite which excerpt(s) you used by their number in brackets, e.g. [1]. If the excerpts don't contain the answer, say so plainly rather than guessing."""
+SYNTHESIS_SYSTEM_PROMPT = """Answer the user's question using ONLY the provided document excerpts. Cite which excerpt(s) you used by their number in brackets, e.g. [1]. If the excerpts don't contain the answer, say so plainly rather than guessing. If a "Conversation so far" section is provided, use it to resolve references like "it", "that one", or "the second document" in the current question - but still answer only from the document excerpts below, not from your own memory of the earlier answers."""
 
 
 async def answer_from_documents_node(state: QueryState) -> dict:
@@ -28,9 +28,16 @@ async def answer_from_documents_node(state: QueryState) -> dict:
         }
 
     excerpts_block = "\n\n".join(f"[{i + 1}] {m['content']}" for i, m in enumerate(matches))
+    history_block = ""
+    if state.history:
+        exchanges = "\n\n".join(
+            f"Q: {h.query}\nA: {h.answer}" for h in state.history[-10:]
+        )
+        history_block = f"Conversation so far:\n{exchanges}\n\n"
+
     answer = await groq_client.chat_completion(
         system_prompt=SYNTHESIS_SYSTEM_PROMPT,
-        user_content=f"Question: {state.query}\n\nDocument excerpts:\n{excerpts_block}",
+        user_content=f"{history_block}Question: {state.query}\n\nDocument excerpts:\n{excerpts_block}",
         max_tokens=600,
     )
 

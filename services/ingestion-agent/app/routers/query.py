@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.auth import verify_shared_secret
 from app.graph.query_build import build_query_graph
-from app.graph.query_state import Citation, QueryState
+from app.graph.query_state import Citation, HistoryExchange, QueryState
 from app.metrics import query_requests_total
 
 logger = logging.getLogger("ingestion_agent.query")
@@ -17,6 +17,7 @@ class QueryRequest(BaseModel):
     query: str
     user_id: str
     document_ids: list[str] = []
+    history: list[HistoryExchange] = []
 
 
 class QueryResponse(BaseModel):
@@ -29,7 +30,10 @@ class QueryResponse(BaseModel):
 async def query(payload: QueryRequest) -> QueryResponse:
     graph = build_query_graph()
     state = QueryState(
-        query=payload.query, user_id=payload.user_id, document_ids=payload.document_ids
+        query=payload.query,
+        user_id=payload.user_id,
+        document_ids=payload.document_ids,
+        history=payload.history,
     )
     result = await graph.ainvoke(state)
     intent = result.get("intent") or "answer_from_documents"

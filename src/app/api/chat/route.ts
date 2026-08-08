@@ -40,6 +40,12 @@ import {
 } from '@/lib/groq/client'
 import type { GroqReasoningParams, GroqVisionReasoningParams } from '@/lib/groq/client'
 import { getActiveSystemPrompt } from '@/lib/db/system-prompt'
+import {
+  appendCachedMessages,
+  getCachedHistory,
+  invalidateCachedHistory,
+  setCachedHistory
+} from '@/lib/redis/conversation-history'
 
 type Client = SupabaseClient<Database>
 type ModelChoice = 'groq' | 'gemini'
@@ -236,7 +242,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     return new Response('Not found', { status: 404 })
   }
 
-  const history = await listMessages(supabase, conversationId)
+  // Redis-cached read (last ~10 exchanges) in front of Supabase — cuts a
+  // Postgres round-trip on the common case of continuing an already-active
+  // conversation. Supabase stays authoritative: a cache miss falls back to
+  // it and repopulates the cache, and every write below still goes to
+  // Supabase first regardless of cache state.
+  const cachedHistory = await getCachedHistory(conversationId)
+  const history = cachedHistory ?? (await listMessages(supabase, conversationId))
+  if (!cachedHistory) void setCachedHistory(conversationId, history)
   const shouldAutoTitle =
     !regenerate && history.length === 0 && conversation.title === DEFAULT_CONVERSATION_TITLE
 
@@ -576,6 +589,20 @@ export async function POST(request: NextRequest): Promise<Response> {
 
           if (shouldAutoTitle) {
             await autoTitleConversation(conversationId, effectiveContent, fullContent, supabase)
+          }
+
+          // Keep the Redis cache warm for the next turn. Regenerate
+          // replaces an existing assistant message rather than appending a
+          // new exchange, which the cache can't cheaply splice in-place —
+          // simplest correct move there is to drop it and let the next
+          // read repopulate from Supabase (still authoritative either way).
+          if (regenerate) {
+            void invalidateCachedHistory(conversationId)
+          } else {
+            void appendCachedMessages(conversationId, [
+              { role: 'user', content: effectiveContent, image_url: effectiveImageUrl ?? null },
+              { role: 'assistant', content: fullContent, image_url: null }
+            ])
           }
 
           // Not awaited: a memory-worth-saving check shouldn't add latency

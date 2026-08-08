@@ -14,6 +14,12 @@ interface QueryResult {
   intent: string
   answer: string
   citations: Citation[]
+  threadId: string
+}
+
+interface Exchange {
+  query: string
+  result: QueryResult
 }
 
 const INTENT_LABELS: Record<string, string> = {
@@ -23,16 +29,24 @@ const INTENT_LABELS: Record<string, string> = {
   extract_structured_data: 'Extracted data'
 }
 
-// Deliberately minimal for this phase: a standalone query box, not woven
-// into the main chat interface (that's a bigger UX question — see the
-// agentic ingestion plan's Phase 8 notes). Selecting documents is optional;
-// answer_from_documents searches across all of them by similarity
-// regardless, but summarize/compare/extract need an explicit selection.
+// A standalone query box, not woven into the main chat interface (that's a
+// bigger UX question — see the agentic ingestion plan's Phase 8 notes).
+// Selecting documents is optional; answer_from_documents searches across
+// all of them by similarity regardless, but summarize/compare/extract need
+// an explicit selection.
+//
+// threadId + exchanges give this workflow the same short-term memory as
+// the main chat (last ~10 exchanges, Redis-backed — see
+// lib/redis/query-history.ts): follow-up questions like "compare that to
+// something cheaper" now have context instead of being answered in
+// isolation. The thread is a client-side session only (resets on reload,
+// or via "New topic") since this workflow has no durable conversation row.
 export default function AskDocuments({ documents }: { documents: DocumentSummary[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<QueryResult | null>(null)
+  const [threadId, setThreadId] = useState<string | null>(null)
+  const [exchanges, setExchanges] = useState<Exchange[]>([])
   const [error, setError] = useState<string | null>(null)
 
   if (documents.length === 0) return null
@@ -48,18 +62,21 @@ export default function AskDocuments({ documents }: { documents: DocumentSummary
 
   const handleAsk = async (): Promise<void> => {
     if (!query.trim()) return
+    const askedQuery = query
     setLoading(true)
     setError(null)
-    setResult(null)
 
     try {
       const response = await fetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, documentIds: [...selected] })
+        body: JSON.stringify({ query: askedQuery, documentIds: [...selected], threadId })
       })
       if (!response.ok) throw new Error(await response.text())
-      setResult((await response.json()) as QueryResult)
+      const result = (await response.json()) as QueryResult
+      setThreadId(result.threadId)
+      setExchanges((prev) => [...prev, { query: askedQuery, result }])
+      setQuery('')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -67,9 +84,22 @@ export default function AskDocuments({ documents }: { documents: DocumentSummary
     }
   }
 
+  const handleNewTopic = (): void => {
+    setThreadId(null)
+    setExchanges([])
+    setError(null)
+  }
+
   return (
     <div className="mt-8 border-t border-[var(--border)] pt-6">
-      <h2 className="mb-3 text-sm font-medium text-[var(--text)]">Ask about your documents</h2>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-[var(--text)]">Ask about your documents</h2>
+        {exchanges.length > 0 && (
+          <button onClick={handleNewTopic} className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]">
+            New topic
+          </button>
+        )}
+      </div>
 
       <div className="mb-3 flex flex-wrap gap-2">
         {documents.map((doc) => (
@@ -112,22 +142,30 @@ export default function AskDocuments({ documents }: { documents: DocumentSummary
 
       {error && <p className="mt-3 text-sm text-[var(--danger)]">{error}</p>}
 
-      {result && (
-        <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
-          <div className="mb-2 text-xs font-medium text-[var(--accent-a)]">
-            {INTENT_LABELS[result.intent] ?? result.intent}
-          </div>
-          <div className="whitespace-pre-wrap text-sm text-[var(--text)]">{result.answer}</div>
-          {result.citations.length > 0 && (
-            <div className="mt-3 space-y-1 border-t border-[var(--border)] pt-3">
-              {result.citations.map((citation, index) => (
-                <div key={citation.chunk_id} className="text-xs text-[var(--text-muted)]">
-                  [{index + 1}] {citation.content.slice(0, 120)}
-                  {citation.content.length > 120 ? '…' : ''}
+      {exchanges.length > 0 && (
+        <div className="mt-4 space-y-3">
+          {exchanges.map((exchange, exchangeIndex) => (
+            <div
+              key={exchangeIndex}
+              className="rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-4"
+            >
+              <div className="mb-2 text-sm font-medium text-[var(--text)]">{exchange.query}</div>
+              <div className="mb-2 text-xs font-medium text-[var(--accent-a)]">
+                {INTENT_LABELS[exchange.result.intent] ?? exchange.result.intent}
+              </div>
+              <div className="whitespace-pre-wrap text-sm text-[var(--text)]">{exchange.result.answer}</div>
+              {exchange.result.citations.length > 0 && (
+                <div className="mt-3 space-y-1 border-t border-[var(--border)] pt-3">
+                  {exchange.result.citations.map((citation, index) => (
+                    <div key={citation.chunk_id} className="text-xs text-[var(--text-muted)]">
+                      [{index + 1}] {citation.content.slice(0, 120)}
+                      {citation.content.length > 120 ? '…' : ''}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )}
+          ))}
         </div>
       )}
     </div>
