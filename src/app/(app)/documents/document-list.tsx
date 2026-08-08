@@ -49,6 +49,8 @@ export default function DocumentList({
   const [documents, setDocuments] = useState<IngestedDocument[]>(initialDocuments)
   const [jobs, setJobs] = useState<IngestingJob[]>([])
   const [uploading, setUploading] = useState(false)
+  const [urlValue, setUrlValue] = useState('')
+  const [uploadingUrl, setUploadingUrl] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const jobsRef = useRef<IngestingJob[]>([])
@@ -128,6 +130,35 @@ export default function DocumentList({
     setJobs((prev) => [...prev, { id: jobId, filename: file.name, status: 'pending' }])
   }
 
+  const handleUrlSubmit = async (): Promise<void> => {
+    const trimmed = urlValue.trim()
+    if (!trimmed) return
+
+    setUploadingUrl(true)
+    setError(null)
+
+    try {
+      if (!serviceOnline) {
+        throw new Error('Document tools are temporarily offline — try again in a bit.')
+      }
+      const response = await fetch('/api/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: trimmed })
+      })
+      if (!response.ok) throw new Error(await response.text())
+
+      const { jobId } = (await response.json()) as { jobId: string }
+      setJobs((prev) => [...prev, { id: jobId, filename: trimmed, status: 'pending' }])
+      setUrlValue('')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message)
+    } finally {
+      setUploadingUrl(false)
+    }
+  }
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -170,7 +201,7 @@ export default function DocumentList({
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap items-center gap-3">
         <label
           className="inline-flex cursor-pointer items-center gap-2 rounded-lg px-5 py-3 font-medium text-black disabled:opacity-60"
           style={{ background: 'var(--accent-gradient)' }}
@@ -186,8 +217,29 @@ export default function DocumentList({
             className="hidden"
           />
         </label>
-        {error && <p className="mt-2 text-sm text-[var(--danger)]">{error}</p>}
+
+        <div className="flex items-center gap-2">
+          <input
+            type="url"
+            value={urlValue}
+            onChange={(e) => setUrlValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleUrlSubmit()
+            }}
+            placeholder="or paste a web page URL to ingest"
+            disabled={uploadingUrl}
+            className="w-64 rounded-lg border border-[var(--border)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] disabled:opacity-60"
+          />
+          <button
+            onClick={() => void handleUrlSubmit()}
+            disabled={uploadingUrl || !urlValue.trim()}
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--text)] disabled:opacity-60"
+          >
+            {uploadingUrl ? 'Adding…' : 'Add'}
+          </button>
+        </div>
       </div>
+      {error && <p className="-mt-4 mb-6 text-sm text-[var(--danger)]">{error}</p>}
 
       <div className="space-y-2">
         {jobs.map((job) => (
