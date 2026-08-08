@@ -413,6 +413,71 @@ export async function POST(request: NextRequest): Promise<Response> {
             // — same shape as the Groq follow-up round below.
             await streamGeminiRound(followUpContents, systemPrompt, undefined, maxTokens, emit)
           }
+        } else if (usesVision) {
+          // Groq's vision model (VISION_MODEL) doesn't reliably support
+          // real structured tool-calling alongside image content —
+          // verified live: given an image + a question needing a web
+          // lookup (e.g. "what's the price of this watch"), it wrote a
+          // literal `<tool_call>...</tool_call>`-shaped string into the
+          // visible reply instead of actually invoking search_web via the
+          // API's real function-calling mechanism. Split into two rounds
+          // instead: the vision model first produces a grounded,
+          // question-aware description of the image (no tools offered,
+          // nothing streamed to the user yet — this round is perception
+          // only), then the normal text model — which reliably handles
+          // tool-calling everywhere else in this app — answers the user's
+          // actual question using that description as context, with full
+          // tool access including search_web.
+          let imageDescription = ''
+          await streamOneRound(baseMessages, {}, groqModel, (delta) => {
+            imageDescription += delta
+          })
+
+          const textModel = { name: getGroqModel(), maxTokens: 1024, reasoning: SUPPRESS_REASONING }
+          const descriptionSystemPrompt = `${systemPrompt}\n\nThe user's message included an image. Here is a factual description of what it shows:\n${imageDescription}`
+          const textOnlyMessages: ChatCompletionMessageParam[] = [
+            { role: 'system', content: descriptionSystemPrompt },
+            ...conversationMessages.map(
+              (m) => ({ role: m.role, content: toContentParam(m, false) }) as ChatCompletionMessageParam
+            )
+          ]
+
+          const toolCalls = await streamOneRound(
+            textOnlyMessages,
+            { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
+            textModel,
+            emit
+          )
+
+          if (toolCalls.length > 0) {
+            const toolResultMessages: ChatCompletionMessageParam[] = await Promise.all(
+              toolCalls.map(async (toolCall) => ({
+                role: 'tool' as const,
+                tool_call_id: toolCall.id,
+                content: await executeToolCall(
+                  { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
+                  supabase,
+                  user.id
+                )
+              }))
+            )
+
+            const followUpMessages: ChatCompletionMessageParam[] = [
+              ...textOnlyMessages,
+              {
+                role: 'assistant',
+                content: fullContent || null,
+                tool_calls: toolCalls.map((toolCall) => ({
+                  id: toolCall.id,
+                  type: 'function',
+                  function: { name: toolCall.name, arguments: toolCall.argumentsJson }
+                }))
+              },
+              ...toolResultMessages
+            ]
+
+            await streamOneRound(followUpMessages, {}, textModel, emit)
+          }
         } else {
           const toolCalls = await streamOneRound(
             baseMessages,

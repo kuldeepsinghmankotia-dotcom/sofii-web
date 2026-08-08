@@ -3,7 +3,7 @@ import type { Database } from '@/types/database'
 import { createMemory } from '@/lib/db/memories'
 import { createReminder, listPendingReminders } from '@/lib/db/reminders'
 import { getWeather } from '@/lib/weather/weather'
-import { searchWeb } from '@/lib/search/duckduckgo'
+import { searchWeb } from '@/lib/search/tavily'
 import { createCalendarEvent, getValidAccessToken, listUpcomingEvents } from '@/lib/google/calendar'
 
 const CALENDAR_NOT_CONNECTED =

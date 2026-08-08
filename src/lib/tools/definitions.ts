@@ -75,11 +75,11 @@ export const TOOL_DEFINITIONS: ChatCompletionFunctionTool[] = [
     function: {
       name: 'search_web',
       description:
-        'Look up a quick factual answer, definition, or summary for a topic. IMPORTANT limitation: this only returns quick facts/knowledge-panel-style summaries, not general web search results, and often returns nothing for current-events, opinion, or highly specific queries. Only use it for well-defined factual lookups (e.g. "what is X", "who is Y"), and if it returns no result, tell the user a full web search is not available rather than guessing or making something up.',
+        'Search the web for current information — facts, current events, and product/pricing queries all work, returning multiple results with titles, snippets, and source URLs. For product or pricing questions specifically: compare results across at least 2-3 different sources/websites when available, cite the specific source links in your answer, and end with 2-3 relevant follow-up questions the user might want to ask next (e.g. availability, alternatives, or where to buy). If no useful results are found, tell the user honestly rather than guessing or making something up.',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'The factual question or topic to look up.' }
+          query: { type: 'string', description: 'The search query — be specific for product lookups (include brand, model, and any identifying details).' }
         },
         required: ['query']
       }
