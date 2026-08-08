@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createIngestionJob, markIngestionJobFailed } from '@/lib/db/ingestion-jobs'
+import { getIngestRatelimit } from '@/lib/redis/ratelimit'
 
 // Same platform cap as /api/documents/upload — see that route's comment.
 const MAX_FILE_BYTES = 4 * 1024 * 1024
@@ -39,6 +40,14 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   if (!user) {
     return new Response('Unauthorized', { status: 401 })
+  }
+
+  const rateLimit = await getIngestRatelimit().limit(user.id)
+  if (!rateLimit.success) {
+    return new Response("You've uploaded too many documents recently — please try again later.", {
+      status: 429,
+      headers: { 'Retry-After': String(Math.max(1, Math.ceil((rateLimit.reset - Date.now()) / 1000))) }
+    })
   }
 
   const formData = await request.formData()

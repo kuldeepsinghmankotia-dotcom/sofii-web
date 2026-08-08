@@ -39,7 +39,13 @@ function extensionOf(filename: string): string {
   return dot === -1 ? '' : filename.slice(dot + 1).toLowerCase()
 }
 
-export default function DocumentList({ initialDocuments }: { initialDocuments: DocumentSummary[] }) {
+export default function DocumentList({
+  initialDocuments,
+  serviceOnline
+}: {
+  initialDocuments: DocumentSummary[]
+  serviceOnline: boolean
+}) {
   const [documents, setDocuments] = useState<IngestedDocument[]>(initialDocuments)
   const [jobs, setJobs] = useState<IngestingJob[]>([])
   const [uploading, setUploading] = useState(false)
@@ -134,6 +140,11 @@ export default function DocumentList({ initialDocuments }: { initialDocuments: D
       if (file.type === 'application/pdf' || extension === 'pdf') {
         await uploadPdf(file)
       } else if (INGEST_EXTENSIONS.has(extension)) {
+        if (!serviceOnline) {
+          throw new Error(
+            'Document tools are temporarily offline, so this file type can\'t be processed right now — only PDF uploads work at the moment.'
+          )
+        }
         await uploadViaIngest(file)
       } else {
         throw new Error('Unsupported file type. Use PDF, .docx, .txt, .html, .csv, or an image.')

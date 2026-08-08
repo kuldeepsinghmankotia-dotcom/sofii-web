@@ -1,4 +1,5 @@
 import { NextRequest, after } from 'next/server'
+import { getChatRatelimit } from '@/lib/redis/ratelimit'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type {
   ChatCompletionCreateParamsNonStreaming,
@@ -20,7 +21,7 @@ import { insertMessage, listMessages, type ChatMessage } from '@/lib/db/messages
 import { createMemory, listMemories, recordMemoryUsage } from '@/lib/db/memories'
 import { rankMemoriesByRelevance } from '@/lib/memory/ranking'
 import { extractMemoryCandidate } from '@/lib/memory/extract'
-import { hasAnyDocuments, matchDocumentChunks } from '@/lib/db/documents'
+import { listDocuments, matchDocumentChunks } from '@/lib/db/documents'
 import { embedText } from '@/lib/gemini/embeddings'
 import {
   fetchImageAsInlineData,
@@ -234,6 +235,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     return new Response('Unauthorized', { status: 401 })
   }
 
+  const rateLimit = await getChatRatelimit().limit(user.id)
+  if (!rateLimit.success) {
+    return new Response("You're sending messages too quickly — please slow down and try again shortly.", {
+      status: 429,
+      headers: { 'Retry-After': String(Math.max(1, Math.ceil((rateLimit.reset - Date.now()) / 1000))) }
+    })
+  }
+
   // getConversation is RLS-scoped: it returns null both when the
   // conversation doesn't exist and when it belongs to another user, so this
   // 404 never leaks whether a given id belongs to someone else.
@@ -294,11 +303,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     ).catch((error) => console.error('Memory usage tracking error:', error))
   }
 
-  // Skips the embedding API round-trip entirely when the user has never
-  // uploaded a document — the common case, and no point paying that latency
-  // (or Gemini quota) for a search that can only come back empty.
+  // One cheap indexed query doubles as the "has any documents" check (skips
+  // the embedding API round-trip entirely for the common case of a user
+  // with none) and supplies the id/filename list the summarize_document/
+  // compare_documents/extract_structured_data tools need to reference a
+  // specific document by id.
+  const userDocuments = await listDocuments(supabase)
   let relevantChunks: { document_id: string; content: string }[] = []
-  if (await hasAnyDocuments(supabase)) {
+  if (userDocuments.length > 0) {
     try {
       const queryEmbedding = await embedText(effectiveContent)
       relevantChunks = await matchDocumentChunks(supabase, queryEmbedding, DOCUMENT_RECALL_LIMIT)
@@ -320,6 +332,10 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   if (relevantChunks.length > 0) {
     systemPrompt += `\n\nRelevant excerpts from the user's uploaded documents (cite naturally, don't fabricate beyond what's here):\n${relevantChunks.map((c) => `- ${c.content}`).join('\n\n')}`
+  }
+
+  if (userDocuments.length > 0) {
+    systemPrompt += `\n\nAvailable documents (use these ids with summarize_document/compare_documents/extract_structured_data — match by filename, and ask the user to clarify if it's ambiguous which one they mean):\n${userDocuments.map((d) => `- ${d.id}: ${d.filename}`).join('\n')}`
   }
 
   // openai/gpt-oss-120b (the default text model) rejects vision content

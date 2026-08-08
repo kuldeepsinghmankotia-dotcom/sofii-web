@@ -122,5 +122,64 @@ export const TOOL_DEFINITIONS: ChatCompletionFunctionTool[] = [
         required: ['summary', 'start_iso', 'end_iso']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'summarize_document',
+      description:
+        'Summarize one of the user\'s uploaded documents in full. Use this when the user asks for a summary of a specific document, rather than answering from a short excerpt. Pick document_id from the "Available documents" list given in the system prompt — match by filename; if it\'s ambiguous which document they mean, ask instead of guessing.',
+      parameters: {
+        type: 'object',
+        properties: {
+          document_id: {
+            type: 'string',
+            description: 'The id of the document to summarize, from the Available documents list.'
+          }
+        },
+        required: ['document_id']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'compare_documents',
+      description:
+        'Compare two or more of the user\'s uploaded documents, noting similarities and differences. Use this when the user asks to compare, contrast, or see how documents differ. Pick document_ids from the "Available documents" list given in the system prompt.',
+      parameters: {
+        type: 'object',
+        properties: {
+          document_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'At least two document ids from the Available documents list.'
+          }
+        },
+        required: ['document_ids']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'extract_structured_data',
+      description:
+        'Extract specific fields or data points from one of the user\'s uploaded documents into structured form (e.g. "pull the vendor, date, and total from this invoice", "list each row as a record"). Use this instead of answering from a short excerpt when the user wants precise, complete fields pulled out. Pick document_id from the "Available documents" list given in the system prompt.',
+      parameters: {
+        type: 'object',
+        properties: {
+          document_id: {
+            type: 'string',
+            description: 'The id of the document to extract from, from the Available documents list.'
+          },
+          request: {
+            type: 'string',
+            description: "What to extract, in the user's own words (e.g. \"name, date, and amount\")."
+          }
+        },
+        required: ['document_id', 'request']
+      }
+    }
   }
 ]

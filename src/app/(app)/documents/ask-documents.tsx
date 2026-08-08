@@ -41,7 +41,13 @@ const INTENT_LABELS: Record<string, string> = {
 // something cheaper" now have context instead of being answered in
 // isolation. The thread is a client-side session only (resets on reload,
 // or via "New topic") since this workflow has no durable conversation row.
-export default function AskDocuments({ documents }: { documents: DocumentSummary[] }) {
+export default function AskDocuments({
+  documents,
+  serviceOnline
+}: {
+  documents: DocumentSummary[]
+  serviceOnline: boolean
+}) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -125,13 +131,18 @@ export default function AskDocuments({ documents }: { documents: DocumentSummary
         <textarea
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="e.g. Summarize this document, or what's the total in my invoice?"
+          placeholder={
+            serviceOnline
+              ? "e.g. Summarize this document, or what's the total in my invoice?"
+              : 'Document tools are temporarily offline — try again in a bit.'
+          }
           rows={2}
-          className="flex-1 resize-none rounded-lg border border-[var(--border)] bg-[var(--surface-input)] p-3 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)]"
+          disabled={!serviceOnline}
+          className="flex-1 resize-none rounded-lg border border-[var(--border)] bg-[var(--surface-input)] p-3 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] disabled:opacity-60"
         />
         <button
           onClick={() => void handleAsk()}
-          disabled={loading || !query.trim()}
+          disabled={loading || !query.trim() || !serviceOnline}
           aria-label="Ask"
           className="shrink-0 rounded-lg px-4 py-2 text-black disabled:opacity-60"
           style={{ background: 'var(--accent-gradient)' }}

@@ -11,6 +11,55 @@ const CALENDAR_NOT_CONNECTED =
 
 type Client = SupabaseClient<Database>
 
+// Shared by summarize_document/compare_documents/extract_structured_data:
+// calls the Python query-agent's /query endpoint directly, server-to-
+// server, with an explicit intent so it skips its own LLM classification
+// step (the caller here already knows exactly which flow it wants). Same
+// service the standalone Ask Documents UI proxies through via /api/query,
+// just invoked without that route's thread-history bookkeeping — a tool
+// call inside main chat already has the whole conversation as context.
+async function callQueryAgent(payload: {
+  query: string
+  userId: string
+  documentIds: string[]
+  intent: 'summarize_document' | 'compare_documents' | 'extract_structured_data'
+}): Promise<string> {
+  const serviceUrl = process.env.INGEST_SERVICE_URL
+  const serviceSecret = process.env.INGEST_SERVICE_SECRET
+
+  if (!serviceUrl || !serviceSecret) {
+    return 'Error: document tools are not configured.'
+  }
+
+  let response: Response
+  try {
+    response = await fetch(`${serviceUrl}/query`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${serviceSecret}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: payload.query,
+        user_id: payload.userId,
+        document_ids: payload.documentIds,
+        intent: payload.intent
+      }),
+      signal: AbortSignal.timeout(45_000)
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return `Error: document tools are temporarily offline (${message}). Tell the user to try again shortly.`
+  }
+
+  if (!response.ok) {
+    if (response.status === 502 || response.status === 503) {
+      return 'Error: document tools are temporarily offline. Tell the user to try again shortly.'
+    }
+    return `Error: document tool request failed (status ${response.status}).`
+  }
+
+  const data = (await response.json()) as { answer?: string }
+  return data.answer?.trim() || 'No answer returned.'
+}
+
 export interface ToolCallRequest {
   name: string
   argumentsJson: string
@@ -133,6 +182,46 @@ export async function executeToolCall(
         const message = error instanceof Error ? error.message : String(error)
         return `Error creating calendar event: ${message}`
       }
+    }
+
+    case 'summarize_document': {
+      const documentId = typeof args.document_id === 'string' ? args.document_id.trim() : ''
+      if (!documentId) return 'Error: document_id is required.'
+
+      return callQueryAgent({
+        query: 'Summarize this document.',
+        userId,
+        documentIds: [documentId],
+        intent: 'summarize_document'
+      })
+    }
+
+    case 'compare_documents': {
+      const documentIds = Array.isArray(args.document_ids)
+        ? args.document_ids.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+        : []
+      if (documentIds.length < 2) return 'Error: at least two document_ids are required.'
+
+      return callQueryAgent({
+        query: 'Compare these documents.',
+        userId,
+        documentIds,
+        intent: 'compare_documents'
+      })
+    }
+
+    case 'extract_structured_data': {
+      const documentId = typeof args.document_id === 'string' ? args.document_id.trim() : ''
+      const extractionRequest = typeof args.request === 'string' ? args.request.trim() : ''
+      if (!documentId) return 'Error: document_id is required.'
+      if (!extractionRequest) return 'Error: request is required.'
+
+      return callQueryAgent({
+        query: extractionRequest,
+        userId,
+        documentIds: [documentId],
+        intent: 'extract_structured_data'
+      })
     }
 
     default:

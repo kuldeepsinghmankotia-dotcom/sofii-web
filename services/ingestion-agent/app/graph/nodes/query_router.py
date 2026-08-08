@@ -34,5 +34,11 @@ async def classify_intent(query: str) -> QueryIntentType:
 
 
 async def query_router_node(state: QueryState) -> dict:
+    # An explicit intent (set by a caller that already knows what it wants —
+    # e.g. the main chat's summarize_document/compare_documents/
+    # extract_structured_data tools) skips classification entirely rather
+    # than re-guessing something the caller was already certain about.
+    if state.intent is not None:
+        return {}
     intent = await classify_intent(state.query)
     return {"intent": intent}

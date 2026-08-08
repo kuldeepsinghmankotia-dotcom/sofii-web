@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { appendQueryExchange, getQueryHistory } from '@/lib/redis/query-history'
+import { getQueryRatelimit } from '@/lib/redis/ratelimit'
 
 interface QueryRequestBody {
   query?: string
@@ -29,6 +30,14 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   if (!user) {
     return new Response('Unauthorized', { status: 401 })
+  }
+
+  const rateLimit = await getQueryRatelimit().limit(user.id)
+  if (!rateLimit.success) {
+    return new Response("You're sending questions too quickly — please slow down and try again shortly.", {
+      status: 429,
+      headers: { 'Retry-After': String(Math.max(1, Math.ceil((rateLimit.reset - Date.now()) / 1000))) }
+    })
   }
 
   const body = (await request.json()) as QueryRequestBody
