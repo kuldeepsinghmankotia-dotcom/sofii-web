@@ -25,7 +25,7 @@ export default async function DocumentsPage() {
       <PageHeader
         icon={FileText}
         title="Documents"
-        description="Upload a PDF, .docx, .txt, .html, .csv, or image file and Sofii will use its contents to answer your questions in chat."
+        description="Upload a PDF, .docx, .pptx, .xlsx, .txt, .md, .html, .csv, or image file (or paste a web page URL) and Sofii will use its contents to answer your questions in chat."
       />
       {!serviceOnline && (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-400">

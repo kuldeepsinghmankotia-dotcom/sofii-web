@@ -14,11 +14,16 @@ _MAGIC_BYTES: list[tuple[bytes, DetectedFormat]] = [
 
 _MIME_FORMAT: dict[str, DetectedFormat] = {
     "text/plain": "txt",
+    # Markdown is just prose text for extraction purposes - no dedicated
+    # node, it goes through the same extract_text_node as .txt.
+    "text/markdown": "txt",
     "text/html": "html",
     "text/csv": "csv",
     "application/csv": "csv",
     "application/pdf": "pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
     "image/jpeg": "image",
     "image/png": "image",
     "image/gif": "image",

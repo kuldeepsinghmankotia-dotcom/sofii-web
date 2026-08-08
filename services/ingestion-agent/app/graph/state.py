@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-DetectedFormat = Literal["txt", "html", "csv", "docx", "image", "pdf", "unknown"]
+DetectedFormat = Literal["txt", "html", "csv", "docx", "pptx", "xlsx", "image", "pdf", "unknown"]
 Modality = Literal["prose", "tabular"]
 
 

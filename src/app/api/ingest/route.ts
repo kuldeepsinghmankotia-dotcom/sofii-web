@@ -18,10 +18,14 @@ const DOCUMENT_UPLOADS_BUCKET = 'document-uploads'
 // accurate.
 const SUPPORTED_EXTENSIONS: Record<string, string> = {
   txt: 'text/plain',
+  md: 'text/markdown',
+  markdown: 'text/markdown',
   html: 'text/html',
   htm: 'text/html',
   csv: 'text/csv',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   png: 'image/png',
@@ -162,7 +166,7 @@ async function handleFileIngestion(request: NextRequest, supabase: Client, user:
 
   if (!mimeType) {
     return new Response(
-      'Only .txt, .html, .csv, .docx, and image (.jpg/.png/.gif/.webp) files are supported here',
+      'Only .txt, .md, .html, .csv, .docx, .pptx, .xlsx, and image (.jpg/.png/.gif/.webp) files are supported here',
       { status: 400 }
     )
   }

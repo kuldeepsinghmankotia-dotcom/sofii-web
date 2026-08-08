@@ -29,6 +29,15 @@ def make_state(mime_type: str, sample_bytes: bytes = b"") -> IngestionState:
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "docx",
         ),
+        (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "pptx",
+        ),
+        (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xlsx",
+        ),
+        ("text/markdown", "txt"),
         ("image/jpeg", "image"),
         ("image/png", "image"),
         ("image/gif", "image"),

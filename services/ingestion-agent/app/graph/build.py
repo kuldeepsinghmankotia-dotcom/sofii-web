@@ -6,7 +6,9 @@ from app.graph.nodes.embed import embed_node
 from app.graph.nodes.extract_csv import extract_csv_node
 from app.graph.nodes.extract_docx import extract_docx_node
 from app.graph.nodes.extract_html import extract_html_node
+from app.graph.nodes.extract_pptx import extract_pptx_node
 from app.graph.nodes.extract_text import extract_text_node
+from app.graph.nodes.extract_xlsx import extract_xlsx_node
 from app.graph.nodes.ocr_ensemble import ocr_ensemble_node
 from app.graph.nodes.persist import persist_node
 from app.graph.nodes.router import router_node
@@ -26,6 +28,10 @@ def _route_by_format(state: IngestionState) -> str:
         return "extract_csv"
     if state.detected_format == "docx":
         return "extract_docx"
+    if state.detected_format == "pptx":
+        return "extract_pptx"
+    if state.detected_format == "xlsx":
+        return "extract_xlsx"
     if state.detected_format == "image":
         return "ocr_ensemble"
     return "unsupported_format"
@@ -39,6 +45,8 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     graph.add_node("extract_html", timed_node("extract_html")(extract_html_node))
     graph.add_node("extract_csv", timed_node("extract_csv")(extract_csv_node))
     graph.add_node("extract_docx", timed_node("extract_docx")(extract_docx_node))
+    graph.add_node("extract_pptx", timed_node("extract_pptx")(extract_pptx_node))
+    graph.add_node("extract_xlsx", timed_node("extract_xlsx")(extract_xlsx_node))
     graph.add_node("ocr_ensemble", timed_node("ocr_ensemble")(ocr_ensemble_node))
     graph.add_node("unsupported_format", timed_node("unsupported_format")(unsupported_format_node))
     graph.add_node("chunk", timed_node("chunk")(chunk_node))
@@ -56,6 +64,8 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
             "extract_html": "extract_html",
             "extract_csv": "extract_csv",
             "extract_docx": "extract_docx",
+            "extract_pptx": "extract_pptx",
+            "extract_xlsx": "extract_xlsx",
             "ocr_ensemble": "ocr_ensemble",
             "unsupported_format": "unsupported_format",
         },
@@ -64,6 +74,8 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     graph.add_edge("extract_html", "chunk")
     graph.add_edge("extract_csv", "chunk")
     graph.add_edge("extract_docx", "chunk")
+    graph.add_edge("extract_pptx", "chunk")
+    graph.add_edge("extract_xlsx", "chunk")
     graph.add_edge("ocr_ensemble", "chunk")
     graph.add_edge("unsupported_format", END)
     graph.add_edge("chunk", "embed")

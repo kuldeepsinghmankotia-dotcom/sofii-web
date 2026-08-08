@@ -22,10 +22,14 @@ type IngestedDocument = DocumentSummary & { flaggedForReview?: boolean }
 // real gate, this set only decides which upload path the browser takes.
 const INGEST_EXTENSIONS = new Set([
   'txt',
+  'md',
+  'markdown',
   'html',
   'htm',
   'csv',
   'docx',
+  'pptx',
+  'xlsx',
   'jpg',
   'jpeg',
   'png',
@@ -178,7 +182,9 @@ export default function DocumentList({
         }
         await uploadViaIngest(file)
       } else {
-        throw new Error('Unsupported file type. Use PDF, .docx, .txt, .html, .csv, or an image.')
+        throw new Error(
+          'Unsupported file type. Use PDF, .docx, .pptx, .xlsx, .txt, .md, .html, .csv, or an image.'
+        )
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -211,7 +217,7 @@ export default function DocumentList({
           <input
             ref={fileInputRef}
             type="file"
-            accept="application/pdf,.txt,.html,.htm,.csv,.docx,image/*"
+            accept="application/pdf,.txt,.md,.markdown,.html,.htm,.csv,.docx,.pptx,.xlsx,image/*"
             onChange={handleFileChange}
             disabled={uploading}
             className="hidden"
