@@ -69,7 +69,7 @@
 
 /* Light theme — same cyan-to-violet identity, deepened for contrast
    against a white ground instead of near-black (the dark theme's bright
-   #22d3ee/#8b5cf6 read as washed-out on white). Set via next-themes'
+   #22d3ee/#8b5cf6 read as washed-out on white). Set via the
    data-theme attribute on <html> (see src/app/layout.tsx) — every
    component already reads these as var(--token), so nothing else needs a
    light-specific class *if* it only ever used these tokens. It's the

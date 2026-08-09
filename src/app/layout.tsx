@@ -1,8 +1,26 @@
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono, Orbitron } from 'next/font/google'
-import { ThemeProvider } from 'next-themes'
 import AppToaster from './app-toaster'
+import { ThemeProvider } from './theme-provider'
+// Imported from the plain (non-'use client') constants module on purpose —
+// see theme-constants.ts for why importing these from the provider itself
+// silently emitted `undefined` into the script below.
+import { DEFAULT_THEME, THEME_STORAGE_KEY } from './theme-constants'
 import './globals.css'
+
+// Runs before first paint, which is the entire point: reading the saved
+// theme in a React effect would mean the page paints in the default theme
+// first and then visibly snaps to the other one. Kept deliberately tiny
+// and wrapped in try/catch — localStorage throws in some privacy modes,
+// and a failure here must fall back to the default rather than leave the
+// page unstyled.
+const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem(${JSON.stringify(
+  THEME_STORAGE_KEY
+)});document.documentElement.setAttribute('data-theme',t==='light'||t==='dark'?t:${JSON.stringify(
+  DEFAULT_THEME
+)})}catch(e){document.documentElement.setAttribute('data-theme',${JSON.stringify(
+  DEFAULT_THEME
+)})}})()`
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -51,23 +69,28 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {
   return (
-    // suppressHydrationWarning on <html> is required by next-themes: it
-    // sets the data-theme attribute via an inline script that runs before
-    // React hydrates (so there's no flash of the wrong theme), which would
-    // otherwise be flagged as a server/client mismatch even though it's
-    // intentional.
+    // suppressHydrationWarning is required because THEME_INIT_SCRIPT sets
+    // data-theme on <html> before React hydrates (so there's no flash of
+    // the wrong theme) — an intentional server/client difference that
+    // would otherwise be reported as a mismatch.
     <html
       lang="en"
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} ${orbitron.variable} h-full antialiased`}
     >
+      <head>
+        {/* Must be raw HTML in <head>, not next/script: it has to execute
+        before the first paint, and anything deferred to hydration is by
+        definition too late to prevent a flash. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="flex min-h-full flex-col">
-        {/* Dark is the app's primary identity — defaultTheme="dark" (not
-        "system") so nobody's OS light-mode preference silently changes
-        Sofii's look on first visit; light is an explicit opt-in via the
-        toggle, not a default. enableSystem is off to match — this is a
-        2-way toggle, not a 3-way light/dark/system picker. */}
-        <ThemeProvider attribute="data-theme" defaultTheme="dark" enableSystem={false}>
+        {/* Dark is the app's primary identity — the default is dark (not
+        the OS setting) so nobody's system light-mode preference silently
+        changes Sofii's look on first visit; light is an explicit opt-in
+        via the toggle. A 2-way toggle, not a 3-way light/dark/system
+        picker. */}
+        <ThemeProvider>
           {children}
           <AppToaster />
         </ThemeProvider>

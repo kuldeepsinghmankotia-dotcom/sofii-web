@@ -1,6 +1,6 @@
 'use client'
 
-import { useTheme } from 'next-themes'
+import { useTheme } from './theme-provider'
 import { Toaster } from 'sonner'
 
 // Split out from layout.tsx because useTheme() needs a client component —
@@ -9,11 +9,11 @@ import { Toaster } from 'sonner'
 // built-in icon/close-button colors, which those inline styles don't
 // reach.
 export default function AppToaster() {
-  const { resolvedTheme } = useTheme()
+  const { theme } = useTheme()
 
   return (
     <Toaster
-      theme={resolvedTheme === 'light' ? 'light' : 'dark'}
+      theme={theme === 'light' ? 'light' : 'dark'}
       position="bottom-center"
       toastOptions={{
         className: 'glass',

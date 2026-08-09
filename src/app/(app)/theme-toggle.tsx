@@ -1,27 +1,28 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useTheme } from 'next-themes'
 import { Moon, Sun } from 'lucide-react'
+import { useTheme } from '../theme-provider'
 import { Tooltip } from './tooltip'
 
 export default function ThemeToggle() {
-  const { resolvedTheme, setTheme } = useTheme()
+  const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
-  // next-themes intentionally resolves the real theme client-side only
-  // (that's what avoids a flash of the wrong theme on load) — resolvedTheme
-  // is undefined on the server and on the client's first render, so
-  // rendering an icon based on it before mount would itself be a
-  // server/client mismatch. Deferred via queueMicrotask per this project's
-  // react-hooks/set-state-in-effect convention.
+  // The real theme is only known client-side (it's read from localStorage
+  // by the inline script in layout.tsx, before React runs), so the
+  // provider's server render always reports the default. Rendering an
+  // icon from that before mount would itself be a server/client mismatch,
+  // so a same-size placeholder holds the space until then — which also
+  // keeps the toolbar from shifting. Deferred via queueMicrotask per this
+  // project's react-hooks/set-state-in-effect convention.
   useEffect(() => {
     queueMicrotask(() => setMounted(true))
   }, [])
 
   if (!mounted) return <div className="h-6 w-6" aria-hidden="true" />
 
-  const isLight = resolvedTheme === 'light'
+  const isLight = theme === 'light'
 
   return (
     <Tooltip label={isLight ? 'Switch to dark theme' : 'Switch to light theme'}>
