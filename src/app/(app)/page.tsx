@@ -1,60 +1,50 @@
-'use client'
-
-import { useState, type KeyboardEvent } from 'react'
-import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
-import { Send } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
-import { notifyConversationsChanged } from './sidebar'
-
-const SUGGESTIONS = [
-  'Explain quantum computing simply',
-  'Draft a polite follow-up email',
-  'Plan a 3-day trip itinerary',
-  'Help me debug an error message'
-]
+import { after } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+import { getCatchUp, shouldShowCatchUp, touchLastActive } from '@/lib/db/catch-up'
+import { CatchUpPanel } from './catch-up-panel'
+import HomeComposer from './home-composer'
 
 // The conversation list itself lives in the persistent sidebar
-// (sidebar.tsx) — this page is the "nothing selected yet" landing state,
-// the same role ChatGPT/Gemini's blank composer screen plays: a centered
-// composer plus a few starting points, not just a bare "new chat" button.
-export default function HomePage() {
-  const [input, setInput] = useState('')
-  const [creating, setCreating] = useState(false)
-  const router = useRouter()
+// (sidebar.tsx) — this page is the "nothing selected yet" landing state.
+//
+// It renders one of two ways:
+// - Returning after a while with something pending: a real catch-up of
+//   what happened while away, with the composer underneath.
+// - Otherwise: the clean centered composer, the same role ChatGPT/Gemini's
+//   blank screen plays.
+//
+// A Server Component so the catch-up data loads in the same render as the
+// page rather than flashing in after a client fetch.
+export default async function HomePage() {
+  const supabase = await createClient()
 
-  const start = async (text: string): Promise<void> => {
-    const trimmed = text.trim()
-    if (!trimmed || creating) return
-    setCreating(true)
+  const {
+    data: { user }
+  } = await supabase.auth.getUser()
 
-    const supabase = createClient()
-    const {
-      data: { user }
-    } = await supabase.auth.getUser()
+  let catchUp = null
+  if (user) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('last_active_at')
+      .eq('id', user.id)
+      .maybeSingle()
 
-    if (!user) {
-      setCreating(false)
-      return
-    }
+    catchUp = await getCatchUp(supabase, profile?.last_active_at ?? null)
 
-    const { data, error } = await supabase
-      .from('conversations')
-      .insert({ user_id: user.id })
-      .select('id')
-      .single()
-
-    setCreating(false)
-    if (error || !data) return
-
-    notifyConversationsChanged()
-    // chat-window.tsx picks this up on mount and sends it as the first
-    // message, then strips the param — see its prefill effect.
-    router.push(`/c/${data.id}?prefill=${encodeURIComponent(trimmed)}`)
+    // Recorded after the catch-up is computed (it reads the OLD value to
+    // decide the window) and via after() so it never delays the render —
+    // this is bookkeeping, not something the page output depends on.
+    after(() => touchLastActive(supabase, user.id))
   }
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter') void start(input)
+  if (catchUp && shouldShowCatchUp(catchUp)) {
+    return (
+      <div className="mx-auto flex h-full w-full max-w-3xl flex-col justify-center gap-6 p-6">
+        <CatchUpPanel catchUp={catchUp} />
+        <HomeComposer compact />
+      </div>
+    )
   }
 
   return (
@@ -71,40 +61,8 @@ export default function HomePage() {
       <p className="max-w-sm text-sm text-[var(--text-muted)]">
         Ask anything, or pick a starting point below.
       </p>
-
-      <div className="accent-ring flex w-full max-w-xl items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-subtle)] p-2">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Message Sofii..."
-          className="flex-1 bg-transparent p-2 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
-        />
-        <button
-          onClick={() => void start(input)}
-          disabled={creating}
-          aria-label="Send message"
-          className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium text-[var(--accent-gradient-text)] disabled:opacity-60"
-          style={{ background: 'var(--accent-gradient)' }}
-        >
-          {creating ? '…' : <Send size={14} />}
-        </button>
-      </div>
-
-      <div className="grid w-full max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
-        {SUGGESTIONS.map((s, i) => (
-          <motion.button
-            key={s}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, delay: i * 0.04 }}
-            onClick={() => void start(s)}
-            disabled={creating}
-            className="rounded-xl border border-[var(--border)] px-4 py-3 text-left text-sm text-[var(--text-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--text)] disabled:opacity-60"
-          >
-            {s}
-          </motion.button>
-        ))}
+      <div className="w-full max-w-xl">
+        <HomeComposer />
       </div>
     </div>
   )
