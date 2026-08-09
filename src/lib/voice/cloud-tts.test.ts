@@ -12,6 +12,10 @@ describe('supportsCloudVoice', () => {
     expect(supportsCloudVoice('en')).toBe(true)
   })
 
+  it('supports Arabic', () => {
+    expect(supportsCloudVoice('ar-SA')).toBe(true)
+  })
+
   it('does not support other languages', () => {
     expect(supportsCloudVoice('hi-IN')).toBe(false)
     expect(supportsCloudVoice('zh-CN')).toBe(false)
@@ -21,24 +25,24 @@ describe('supportsCloudVoice', () => {
 
 describe('fetchCloudSpeech', () => {
   it('returns the audio blob on success', async () => {
-    const blob = new Blob(['fake-mp3-bytes'], { type: 'audio/mpeg' })
+    const blob = new Blob(['fake-wav-bytes'], { type: 'audio/wav' })
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(blob) })
     )
-    const result = await fetchCloudSpeech('hello there')
+    const result = await fetchCloudSpeech('hello there', 'en-US')
     expect(result).toBe(blob)
   })
 
   it('returns null on a non-200 response rather than throwing', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502 }))
-    const result = await fetchCloudSpeech('hello there')
+    const result = await fetchCloudSpeech('hello there', 'en-US')
     expect(result).toBeNull()
   })
 
   it('returns null when the request throws (network error) rather than throwing', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')))
-    const result = await fetchCloudSpeech('hello there')
+    const result = await fetchCloudSpeech('hello there', 'en-US')
     expect(result).toBeNull()
   })
 
@@ -50,10 +54,24 @@ describe('fetchCloudSpeech', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const longText = 'a'.repeat(5000)
-    await fetchCloudSpeech(longText)
+    await fetchCloudSpeech(longText, 'en-US')
 
     const [, options] = fetchMock.mock.calls[0]
-    const body = JSON.parse(options.body) as { text: string }
+    const body = JSON.parse(options.body) as { text: string; lang: string }
     expect(body.text.length).toBe(4000)
+  })
+
+  it('sends the base language code, not the full BCP-47 tag', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: () => Promise.resolve(new Blob())
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchCloudSpeech('hello there', 'en-GB')
+
+    const [, options] = fetchMock.mock.calls[0]
+    const body = JSON.parse(options.body) as { text: string; lang: string }
+    expect(body.lang).toBe('en')
   })
 })

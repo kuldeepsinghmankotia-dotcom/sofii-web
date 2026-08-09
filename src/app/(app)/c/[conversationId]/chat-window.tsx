@@ -340,7 +340,7 @@ export default function ChatWindow({
       // gate not cleared yet, rate limiting) rather than ever being a dead
       // end for spoken replies.
       if (supportsCloudVoice(lang)) {
-        const audioBlob = await fetchCloudSpeech(text)
+        const audioBlob = await fetchCloudSpeech(text, lang)
         if (audioBlob) {
           const url = URL.createObjectURL(audioBlob)
           const audio = new Audio(url)
