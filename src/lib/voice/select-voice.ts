@@ -36,16 +36,50 @@ const SCRIPT_RANGES: { lang: string; pattern: RegExp }[] = [
 
 // Script evidence only, no locale fallback — returns null rather than
 // guessing when text is Latin-script (ambiguous: could be English, French,
-// Spanish, ...). Used to build a *confident* per-conversation language
-// hint for speech-to-text (see chat-window.tsx's speechLangHintRef); a
-// fallback guess would be actively worse there, since a wrong hint passed
-// to Whisper actively degrades transcription instead of just picking a
-// mediocre voice.
+// Spanish, ...). Matches on the *presence* of even a single character in
+// range, which is fine for picking a TTS voice for text that's actually
+// in that script (see detectSpeechLanguage below) but is NOT strong
+// enough evidence to persistently commit to for speech-to-text hinting —
+// see detectConfidentScriptLanguage for that.
 export function detectScriptLanguage(text: string): string | null {
   for (const { lang, pattern } of SCRIPT_RANGES) {
     if (pattern.test(text)) return lang
   }
   return null
+}
+
+// A real bug, not a theoretical one: a single stray character in range
+// (Whisper transcription artifacts happen — noise, a mid-word hallucination)
+// was enough for detectScriptLanguage to "confirm" a language, which
+// chat-window.tsx's speechLangHintRef then locked in for every later
+// recording in the conversation. One bad transcription with a couple of
+// incidental Arabic-range characters latched the whole rest of an
+// English/Hindi conversation onto a forced Arabic hint — and since a
+// wrong hint actively steers Whisper into transcribing into that
+// language's script (verified earlier: the same audio came back in
+// actual Chinese characters when hinted 'zh'), every subsequent turn kept
+// coming back mis-transcribed into Arabic too, and the chat model then
+// correctly mirrored that back in Arabic replies. Requires the detected
+// script to cover a real share of the text, not just be present somewhere
+// in it, before treating it as confident enough to persist.
+const MIN_CONFIDENT_SCRIPT_CHARS = 4
+const MIN_CONFIDENT_SCRIPT_RATIO = 0.3
+
+export function detectConfidentScriptLanguage(text: string): string | null {
+  const detected = detectScriptLanguage(text)
+  if (!detected) return null
+
+  const range = SCRIPT_RANGES.find((r) => r.lang === detected)
+  if (!range) return null
+
+  const matches = text.match(new RegExp(range.pattern.source, 'g')) ?? []
+  const meaningfulChars = text.replace(/\s+/g, '').length
+  if (meaningfulChars === 0) return null
+
+  const ratio = matches.length / meaningfulChars
+  return matches.length >= MIN_CONFIDENT_SCRIPT_CHARS && ratio >= MIN_CONFIDENT_SCRIPT_RATIO
+    ? detected
+    : null
 }
 
 // Emoji read literally by a TTS engine reads as broken, not expressive —

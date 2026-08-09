@@ -40,7 +40,7 @@ import { createClient } from '@/lib/supabase/client'
 import { resizeImageToJpeg } from '@/lib/image/resize'
 import { downloadConversationAsMarkdown } from '@/lib/export/markdown'
 import {
-  detectScriptLanguage,
+  detectConfidentScriptLanguage,
   detectSpeechLanguage,
   keepSpeechAlive,
   loadVoices,
@@ -106,7 +106,13 @@ const MAX_WAIT_FOR_SPEECH_MS = 6000
  */
 function attachSilenceAutoStop(
   stream: MediaStream,
-  onSilence: (heardSpeech: boolean) => void
+  onSilence: (heardSpeech: boolean) => void,
+  // Fires the moment real speech is first detected, not just at the end —
+  // lets the caller track "has anything actually been said yet" in real
+  // time (see heardSpeechRef's own comment) so a manual Stop click part
+  // way through a silent recording can tell the difference from one where
+  // the user genuinely spoke and then stopped.
+  onSpeechStart?: () => void
 ): () => void {
   const audioCtx = new AudioContext()
   const source = audioCtx.createMediaStreamSource(stream)
@@ -141,6 +147,7 @@ function attachSilenceAutoStop(
     const rms = Math.sqrt(sumSquares / data.length)
 
     if (rms > SPEECH_RMS_THRESHOLD) {
+      if (!hasSpoken) onSpeechStart?.()
       hasSpoken = true
       silenceStartedAt = null
       return
@@ -224,16 +231,20 @@ export default function ChatWindow({
   const programmaticScrollRef = useRef(false)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const vadStopRef = useRef<(() => void) | null>(null)
-  const heardSpeechRef = useRef(true)
+  // Reset to false at the start of every recording — see startRecording's
+  // own comment on why this must never default to true.
+  const heardSpeechRef = useRef(false)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const prefillSentRef = useRef(false)
   const activeRecordingIsHandsFreeRef = useRef(false)
   // Set only once a transcription in this conversation has come back with
   // confident, unambiguous script evidence (e.g. Devanagari) — see
-  // detectScriptLanguage's own comment on why this never starts as a
-  // guess. Once set, every later recording in this conversation passes it
-  // to Whisper as a hint, which is what actually stops the language from
+  // detectConfidentScriptLanguage's own comment on why this never starts
+  // as a guess, and why "confident" specifically requires a meaningful
+  // share of the text to be in that script, not just one stray character.
+  // Once set, every later recording in this conversation passes it to
+  // Whisper as a hint, which is what actually stops the language from
   // flip-flopping turn to turn (the reported Hindi-transcribed-as-Chinese
   // bug) instead of re-guessing from scratch on every single utterance.
   const speechLangHintRef = useRef<string | null>(null)
@@ -761,7 +772,17 @@ export default function ChatWindow({
         mimeType: 'audio/webm;codecs=opus'
       })
       audioChunksRef.current = []
-      heardSpeechRef.current = true
+      // Starts false, not true: previously defaulted to true and only the
+      // VAD's own eventual onSilence callback (below) ever set it — so a
+      // manual Stop click before that fired (the common case: click, say
+      // nothing, click again) left it stuck at its initial true, and a
+      // near-silent clip got transcribed anyway. Whisper can hallucinate
+      // real-looking text from silence, which is exactly the "it always
+      // takes something on its own" bug this fixes. onSpeechStart below
+      // flips this the moment real speech is actually detected, so it's
+      // accurate at whatever instant a Stop click (manual or automatic)
+      // happens, not just at the end of the recording.
+      heardSpeechRef.current = false
       setMicStream(stream)
 
       recorder.ondataavailable = (e): void => {
@@ -800,10 +821,15 @@ export default function ChatWindow({
           const { text } = (await response.json()) as { text: string }
           // Locks in a hint for every later recording in this conversation
           // once real script evidence shows up — see speechLangHintRef's
-          // own comment. Never downgraded back to null by Latin-script
-          // text afterward: a confirmed non-English speaker occasionally
-          // saying an English word/name shouldn't reset the hint.
-          const detectedScript = detectScriptLanguage(text)
+          // own comment. detectConfidentScriptLanguage (not the plain
+          // detectScriptLanguage) specifically: a single stray character
+          // from a transcription artifact must never be enough to commit
+          // to a hint that then persists and actively distorts every
+          // later turn — a real bug, not a hypothetical one.
+          // Never downgraded back to null by Latin-script text afterward:
+          // a confirmed non-English speaker occasionally saying an
+          // English word/name shouldn't reset the hint.
+          const detectedScript = detectConfidentScriptLanguage(text)
           if (detectedScript) speechLangHintRef.current = detectedScript.split('-')[0]
 
           if (text.trim()) {
@@ -831,13 +857,19 @@ export default function ChatWindow({
 
       // Runs for every recording now, not just hands-free ones — see this
       // function's own comment.
-      vadStopRef.current = attachSilenceAutoStop(stream, (heardSpeech) => {
-        heardSpeechRef.current = heardSpeech
-        if (mediaRecorderRef.current?.state === 'recording') {
-          mediaRecorderRef.current.stop()
+      vadStopRef.current = attachSilenceAutoStop(
+        stream,
+        (heardSpeech) => {
+          heardSpeechRef.current = heardSpeech
+          if (mediaRecorderRef.current?.state === 'recording') {
+            mediaRecorderRef.current.stop()
+          }
+          setIsRecording(false)
+        },
+        () => {
+          heardSpeechRef.current = true
         }
-        setIsRecording(false)
-      })
+      )
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       toast.error(`Microphone unavailable: ${message}`)
@@ -849,16 +881,19 @@ export default function ChatWindow({
     vadStopRef.current?.()
     vadStopRef.current = null
     if (mediaRecorderRef.current?.state === 'recording') {
-      // A manual Stop click during a hands-free (Jarvis) recording means
-      // "cancel this turn" — routed through the same "no speech heard"
-      // bail-out onstop already has for VAD giving up, skipping
-      // transcription entirely. Without this, stopping mid-turn still
-      // transcribed a near-silent clip; Whisper can hallucinate non-empty
-      // text from that, sending an unwanted message whose reply (Jarvis
-      // still on) reopened the mic again — the exact "stop doesn't stop,
-      // it reopens" loop this fixes. Manual (non-hands-free) push-to-talk
-      // recordings are unaffected: heardSpeechRef stays whatever it
-      // already was (true, since nothing else touches it in that path).
+      // A manual Stop click during a hands-free (Jarvis) recording always
+      // means "cancel this turn", even if the user had started speaking —
+      // routed through the same "no speech heard" bail-out onstop already
+      // has for VAD giving up, skipping transcription entirely. Without
+      // this, stopping mid-turn still transcribed whatever was captured so
+      // far, sending an unwanted partial message whose reply (Jarvis still
+      // on) reopened the mic again — the exact "stop doesn't stop, it
+      // reopens" loop this fixes. This is a deliberate hands-free-only
+      // override, separate from the general "was anything actually said"
+      // tracking startRecording's onSpeechStart callback does — a manual
+      // (non-hands-free) push-to-talk Stop click doesn't hit this branch
+      // at all, so heardSpeechRef is left exactly as accurate as it
+      // already was in real time.
       if (activeRecordingIsHandsFreeRef.current) heardSpeechRef.current = false
       mediaRecorderRef.current.stop()
     }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import {
+  detectConfidentScriptLanguage,
   detectScriptLanguage,
   detectSpeechLanguage,
   keepSpeechAlive,
@@ -119,6 +120,37 @@ describe('detectScriptLanguage', () => {
     // blocks, so this should never happen from this function's own logic -
     // guards against a future SCRIPT_RANGES edit reintroducing overlap.
     expect(detectScriptLanguage('नमस्ते')).not.toBe('zh-CN')
+  })
+
+  it('matches on a single stray character - deliberately loose, see detectConfidentScriptLanguage', () => {
+    expect(detectScriptLanguage('Hello, my friend ا')).toBe('ar-SA')
+  })
+})
+
+describe('detectConfidentScriptLanguage', () => {
+  it('confirms a real, mostly-Hindi sentence', () => {
+    expect(detectConfidentScriptLanguage('नमस्ते, आप कैसे हैं?')).toBe('hi-IN')
+  })
+
+  it('does not lock in a language from one stray character in an otherwise English sentence', () => {
+    // The actual reported regression: a single incidental Arabic-range
+    // character in a transcription (a Whisper artifact) locked the
+    // per-conversation hint to Arabic, which then forced every later
+    // turn - in whatever language was actually spoken - to be
+    // transcribed (and therefore replied to) in Arabic too.
+    expect(detectConfidentScriptLanguage('Hello, my friend ا')).toBeNull()
+  })
+
+  it('returns null for plain Latin-script text', () => {
+    expect(detectConfidentScriptLanguage('Hello, how are you?')).toBeNull()
+  })
+
+  it('returns null for empty text', () => {
+    expect(detectConfidentScriptLanguage('')).toBeNull()
+  })
+
+  it('confirms a real, mostly-Arabic sentence (not just any Arabic text)', () => {
+    expect(detectConfidentScriptLanguage('مرحبا كيف حالك اليوم')).toBe('ar-SA')
   })
 })
 
