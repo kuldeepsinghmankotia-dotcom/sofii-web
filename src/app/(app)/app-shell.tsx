@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { motion, type PanInfo } from 'framer-motion'
 import { Menu } from 'lucide-react'
 import Sidebar from './sidebar'
+import FeedbackWidget from './feedback-widget'
 import CommandPalette from './command-palette'
 import ReminderPoller from './reminder-poller'
 import PushSubscribe from './push-subscribe'
@@ -86,6 +87,9 @@ export default function AppShell({
           </header>
           <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
         </div>
+        {/* Mounted app-wide, opened from the sidebar's Help & feedback
+            entry via a window event — see feedback-widget.tsx. */}
+        <FeedbackWidget />
         {!sidebarOpen && (
           <motion.div
             onPanEnd={handleEdgePanEnd}

@@ -12,6 +12,7 @@ import {
   FileText,
   MoreHorizontal,
   Pencil,
+  MessageSquarePlus,
   Plus,
   Search,
   ShieldCheck,
@@ -25,6 +26,7 @@ import SignOutButton from './sign-out-button'
 import ThemeToggle from './theme-toggle'
 import { Tooltip } from './tooltip'
 import { MOBILE_QUERY, useIsMobile } from './use-is-mobile'
+import { openFeedback } from './feedback-widget'
 
 // w-72 in Tailwind's default scale.
 const SIDEBAR_WIDTH_PX = 288
@@ -398,6 +400,22 @@ export default function Sidebar({
               {link.label}
             </Link>
           ))}
+
+          {/* Not a Link: opens the app-wide feedback panel in place rather
+              than navigating away from whatever the user was stuck on,
+              which is usually the context they want to describe. Lives in
+              the nav (not a floating button) so it's reachable on mobile
+              without colliding with the composer. */}
+          <button
+            onClick={() => {
+              onClose()
+              openFeedback()
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
+          >
+            <MessageSquarePlus size={15} aria-hidden="true" />
+            Help &amp; feedback
+          </button>
         </div>
 
         <div className="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] px-3 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] text-xs text-[var(--text-muted)]">

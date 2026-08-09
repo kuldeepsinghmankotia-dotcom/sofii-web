@@ -12,7 +12,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   } = await supabase.auth.getUser()
 
   if (!user) {
-    redirect('/sign-in')
+    // Signed-out visitors get the marketing page rather than a bare
+    // sign-in form. Previously every unauthenticated hit on "/" bounced
+    // straight to /sign-in, which meant there was nothing to link to and
+    // nothing explaining what Sofii is — the single biggest obstacle to
+    // anyone actually signing up.
+    redirect('/landing')
   }
 
   const [conversations, role] = await Promise.all([
