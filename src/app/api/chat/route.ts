@@ -521,6 +521,71 @@ export async function POST(request: NextRequest): Promise<Response> {
         controller.enqueue(encoder.encode(delta))
       }
 
+    // Real requests routinely need more than one round of tools: "list my
+    // reminders, then cancel the plants one" is list_reminders → read the
+    // id → cancel_reminder, and the same list-then-act shape covers
+    // memories and calendar events.
+    //
+    // This used to be capped at exactly one round, with the follow-up call
+    // passing no tools at all. Groq treats that as tool_choice: "none" and
+    // returns a hard 400 ("Tool choice is none, but model called a tool")
+    // when the model tries anyway — so a two-step request didn't degrade to
+    // a partial answer, it failed the whole turn with "Something went
+    // wrong". Verified from the real production error, whose
+    // failed_generation was a cancel_reminder call.
+    //
+    // Still bounded: tools stay available for MAX_TOOL_ROUNDS, then the
+    // final call omits them so the model has to produce prose and the loop
+    // can't run away.
+    const MAX_TOOL_ROUNDS = 4
+
+    const runGroqToolLoop = async (
+      initialMessages: ChatCompletionMessageParam[],
+      model: { name: string; maxTokens: number; reasoning: GroqReasoningParams | GroqVisionReasoningParams }
+    ): Promise<void> => {
+      const messages = [...initialMessages]
+
+      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        // Content streamed so far is captured per-round so the assistant
+        // turn recorded below carries only what THIS round produced.
+        const contentBefore = fullContent
+        const toolCalls = await streamOneRound(
+          messages,
+          { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
+          model,
+          emit
+        )
+
+        if (toolCalls.length === 0) return
+
+        // Independent tool calls in the same round run concurrently.
+        const toolResultMessages: ChatCompletionMessageParam[] = await Promise.all(
+          toolCalls.map(async (toolCall) => ({
+            role: 'tool' as const,
+            tool_call_id: toolCall.id,
+            content: await runTool(toolCall)
+          }))
+        )
+
+        messages.push(
+          {
+            role: 'assistant',
+            content: fullContent.slice(contentBefore.length) || null,
+            tool_calls: toolCalls.map((toolCall) => ({
+              id: toolCall.id,
+              type: 'function',
+              function: { name: toolCall.name, arguments: toolCall.argumentsJson }
+            }))
+          },
+          ...toolResultMessages
+        )
+      }
+
+      // Budget exhausted: no tools offered, so the model must answer with
+      // what it has rather than looping further.
+      await streamOneRound(messages, {}, model, emit)
+    }
+
       try {
         // Set when Gemini's own attempt fails specifically due to its
         // shared free-tier quota (20 generateContent requests/day across
@@ -641,74 +706,9 @@ export async function POST(request: NextRequest): Promise<Response> {
               )
             ]
 
-            const toolCalls = await streamOneRound(
-              textOnlyMessages,
-              { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
-              textModel,
-              emit
-            )
-
-            if (toolCalls.length > 0) {
-              const toolResultMessages: ChatCompletionMessageParam[] = await Promise.all(
-                toolCalls.map(async (toolCall) => ({
-                  role: 'tool' as const,
-                  tool_call_id: toolCall.id,
-                  content: await runTool(toolCall)
-                }))
-              )
-
-              const followUpMessages: ChatCompletionMessageParam[] = [
-                ...textOnlyMessages,
-                {
-                  role: 'assistant',
-                  content: fullContent || null,
-                  tool_calls: toolCalls.map((toolCall) => ({
-                    id: toolCall.id,
-                    type: 'function',
-                    function: { name: toolCall.name, arguments: toolCall.argumentsJson }
-                  }))
-                },
-                ...toolResultMessages
-              ]
-
-              await streamOneRound(followUpMessages, {}, textModel, emit)
-            }
+            await runGroqToolLoop(textOnlyMessages, textModel)
           } else {
-            const toolCalls = await streamOneRound(
-              baseMessages,
-              { tools: TOOL_DEFINITIONS, tool_choice: 'auto' },
-              groqModel,
-              emit
-            )
-
-            if (toolCalls.length > 0) {
-              // Independent tool calls run concurrently rather than one at a time.
-              const toolResultMessages: ChatCompletionMessageParam[] = await Promise.all(
-                toolCalls.map(async (toolCall) => ({
-                  role: 'tool' as const,
-                  tool_call_id: toolCall.id,
-                  content: await runTool(toolCall)
-                }))
-              )
-
-              const followUpMessages: ChatCompletionMessageParam[] = [
-                ...baseMessages,
-                {
-                  role: 'assistant',
-                  content: fullContent || null,
-                  tool_calls: toolCalls.map((toolCall) => ({
-                    id: toolCall.id,
-                    type: 'function',
-                    function: { name: toolCall.name, arguments: toolCall.argumentsJson }
-                  }))
-                },
-                ...toolResultMessages
-              ]
-
-              // Bounded to exactly one tool round: no `tools` option here, so
-              // the model has nothing left to call and must produce a reply.
-              await streamOneRound(followUpMessages, {}, groqModel, emit)
-            }
+            await runGroqToolLoop(baseMessages, groqModel)
           }
         }
       } catch (error) {
