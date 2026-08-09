@@ -68,8 +68,36 @@ export function loadVoices(): Promise<SpeechSynthesisVoice[]> {
 
 const PREFERRED_NAME_HINTS = ['natural', 'enhanced', 'premium', 'neural', 'google']
 
+// Specific voices known to read as warm/pleasant rather than flat or
+// robotic, checked ahead of the generic hints above — this is what
+// actually changes which voice gets picked among several that all
+// technically match the target language (e.g. preferring "Google UK
+// English Female" or "Samantha" over "Google US English" or an OS's
+// arbitrary picked-by-nothing default like "Rishi"/"Albert"). Ordered by
+// preference; first match in the list wins over a later one.
+const CURATED_VOICE_NAMES = [
+  'ava',
+  'samantha',
+  'zoe',
+  'serena',
+  'aria',
+  'jenny',
+  'google uk english female',
+  'google us english',
+  'nicky'
+]
+
 function baseLang(tag: string): string {
   return tag.split('-')[0].toLowerCase()
+}
+
+function curatedRank(name: string): number {
+  const lower = name.toLowerCase()
+  const index = CURATED_VOICE_NAMES.findIndex((curated) => lower.includes(curated))
+  // Higher is better, same direction as the rest of this function's
+  // scoring — a curated match beats every generic-hint/network/default
+  // point combined (at most ~35) without needing them to also line up.
+  return index === -1 ? 0 : (CURATED_VOICE_NAMES.length - index) * 10
 }
 
 // Scoring, not a strict filter: an exact "en-US" match beats a same-family
@@ -96,6 +124,7 @@ export function pickBestVoice(
     else if (baseLang(voice.lang) === targetBase) score += 50
     else continue // wrong language entirely - never picked over "no match"
 
+    score += curatedRank(voice.name)
     if (PREFERRED_NAME_HINTS.some((hint) => voice.name.toLowerCase().includes(hint))) score += 20
     // Network-backed voices are usually the higher-quality ones (vs. the
     // always-available compact/offline voice) where a browser offers both.
@@ -109,4 +138,31 @@ export function pickBestVoice(
   }
 
   return best
+}
+
+// A default rate of 1.0 with no pitch adjustment reads as flat and a
+// little rushed for a conversational assistant — most native TTS engines
+// are tuned for narration speed, not a warm back-and-forth. Slightly
+// slower and a touch higher reads as calmer and more attentive without
+// sliding into "obviously slowed down."
+export const SPEECH_RATE = 0.93
+export const SPEECH_PITCH = 1.05
+
+const KEEP_ALIVE_INTERVAL_MS = 10_000
+
+// Chrome has a long-standing, never-fixed bug where speechSynthesis stalls
+// or cuts an utterance off partway through on anything longer than
+// roughly 15 seconds of audio — exactly what "the voice is lagging"
+// reports as, and exactly what a multi-sentence assistant reply runs into
+// routinely. Periodically pausing and immediately resuming resets the
+// engine's internal timer and is the standard, documented workaround.
+// Harmless on browsers without the bug: pausing/resuming an utterance
+// that was never going to stall just costs a no-op interval tick.
+export function keepSpeechAlive(): () => void {
+  const interval = window.setInterval(() => {
+    if (!window.speechSynthesis.speaking) return
+    window.speechSynthesis.pause()
+    window.speechSynthesis.resume()
+  }, KEEP_ALIVE_INTERVAL_MS)
+  return () => window.clearInterval(interval)
 }

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { detectSpeechLanguage, pickBestVoice } from './select-voice'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { detectSpeechLanguage, keepSpeechAlive, pickBestVoice } from './select-voice'
 
 function voice(overrides: Partial<SpeechSynthesisVoice>): SpeechSynthesisVoice {
   return {
@@ -79,5 +79,66 @@ describe('pickBestVoice', () => {
     const local = voice({ name: 'Local Voice', lang: 'en-US', localService: true })
     const network = voice({ name: 'Network Voice', lang: 'en-US', localService: false })
     expect(pickBestVoice([local, network], 'en-US')).toBe(network)
+  })
+
+  it('prefers a curated warm-sounding voice over a plain default voice', () => {
+    const plain = voice({ name: 'Albert', lang: 'en-US', default: true })
+    const curated = voice({ name: 'Samantha', lang: 'en-US', default: false })
+    expect(pickBestVoice([plain, curated], 'en-US')).toBe(curated)
+  })
+
+  it('respects curated-list order between two curated voices', () => {
+    // 'ava' is listed before 'google us english' in CURATED_VOICE_NAMES.
+    const google = voice({ name: 'Google US English', lang: 'en-US' })
+    const ava = voice({ name: 'Ava', lang: 'en-US' })
+    expect(pickBestVoice([google, ava], 'en-US')).toBe(ava)
+  })
+})
+
+describe('keepSpeechAlive', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('pauses and resumes speechSynthesis while speaking, on an interval', () => {
+    const pause = vi.fn()
+    const resume = vi.fn()
+    vi.stubGlobal('window', {
+      speechSynthesis: { speaking: true, pause, resume },
+      setInterval,
+      clearInterval
+    })
+
+    const stop = keepSpeechAlive()
+    vi.advanceTimersByTime(10_000)
+    expect(pause).toHaveBeenCalledTimes(1)
+    expect(resume).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(10_000)
+    expect(pause).toHaveBeenCalledTimes(2)
+
+    stop()
+    vi.advanceTimersByTime(30_000)
+    expect(pause).toHaveBeenCalledTimes(2) // no further calls after stop()
+  })
+
+  it('does not pause/resume once speech has already finished', () => {
+    const pause = vi.fn()
+    const resume = vi.fn()
+    vi.stubGlobal('window', {
+      speechSynthesis: { speaking: false, pause, resume },
+      setInterval,
+      clearInterval
+    })
+
+    keepSpeechAlive()
+    vi.advanceTimersByTime(10_000)
+    expect(pause).not.toHaveBeenCalled()
+    expect(resume).not.toHaveBeenCalled()
   })
 })

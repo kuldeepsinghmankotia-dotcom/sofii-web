@@ -39,7 +39,14 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { resizeImageToJpeg } from '@/lib/image/resize'
 import { downloadConversationAsMarkdown } from '@/lib/export/markdown'
-import { detectSpeechLanguage, loadVoices, pickBestVoice } from '@/lib/voice/select-voice'
+import {
+  detectSpeechLanguage,
+  keepSpeechAlive,
+  loadVoices,
+  pickBestVoice,
+  SPEECH_PITCH,
+  SPEECH_RATE
+} from '@/lib/voice/select-voice'
 import VoiceOrb from './voice-orb'
 import { CopyButton, ShareButton, AssistantContent } from './message-content'
 import { notifyConversationsChanged } from '../../sidebar'
@@ -220,6 +227,12 @@ export default function ChatWindow({
   const searchParams = useSearchParams()
 
   useEffect(() => {
+    // Warms the browser's voice list on mount rather than waiting for the
+    // first spoken reply to trigger it — Chrome in particular can take up
+    // to ~1s to populate speechSynthesis.getVoices() on a cold page load
+    // (see loadVoices' own comment), which otherwise added that delay to
+    // the very first reply after a user turns spoken replies on.
+    void loadVoices()
     return () => {
       window.speechSynthesis.cancel()
     }
@@ -305,16 +318,27 @@ export default function ChatWindow({
       const voice = pickBestVoice(voices, lang)
       utterance.lang = voice?.lang ?? lang
       if (voice) utterance.voice = voice
+      // Slightly slower and a touch warmer than a TTS engine's narration
+      // default — reads as more attentive/polite, less rushed.
+      utterance.rate = SPEECH_RATE
+      utterance.pitch = SPEECH_PITCH
 
       // isSpeaking gates the wake-word listener below (see that effect) so
       // it doesn't arm itself while Sofii's own voice is playing through
       // the speakers — otherwise the mic could pick up her own reply and
       // misinterpret it as containing the wake word.
       setIsSpeaking(true)
-      utterance.onend = () => {
+      // Chrome silently stalls/cuts off long utterances without this —
+      // see keepSpeechAlive's own comment. Stopped on both end and error
+      // so the interval never outlives the utterance it belongs to.
+      const stopKeepAlive = keepSpeechAlive()
+      const finish = (): void => {
+        stopKeepAlive()
         setIsSpeaking(false)
         onEnd?.()
       }
+      utterance.onend = finish
+      utterance.onerror = finish
       window.speechSynthesis.speak(utterance)
     })()
   }
