@@ -760,13 +760,13 @@ export default function ChatWindow({
     if (isFirstMessage) setTimeout(notifyConversationsChanged, 2500)
 
     // In hands-free mode, keep the conversation going after the spoken
-    // reply finishes — a real Jarvis-style back-and-forth instead of
+    // reply finishes — a real hands-free back-and-forth instead of
     // requiring the wake word again for every turn. Gated on
     // options?.fromHandsFree (not just wakeWordEnabled) so this only
     // chains additional turns onto an ALREADY hands-free exchange (wake
     // word, or a previous auto-continue) — a manually typed message or a
     // manual mic press no longer reopens the mic afterward just because
-    // Jarvis mode happens to be toggled on elsewhere. If the user says
+    // hands-free mode happens to be toggled on elsewhere. If the user says
     // nothing, the VAD's own give-up timeout (see attachSilenceAutoStop)
     // drops this back to passive wake-word listening on its own.
     speak(fullContent, () => {
@@ -813,7 +813,7 @@ export default function ChatWindow({
   const startRecording = async (options?: { handsFree?: boolean }): Promise<void> => {
     // Set here (covering every hands-free recording, whatever triggered
     // it — wake word, or an auto-continue after a reply to a typed
-    // message while Jarvis mode happens to be on) rather than only where
+    // message while hands-free mode happens to be on) rather than only where
     // the wake word is detected: that would leave a gap where this
     // specific recording's later transcribing/sending stage isn't covered
     // by voiceTurnActive, letting the wake-word listener incorrectly
@@ -936,12 +936,12 @@ export default function ChatWindow({
     vadStopRef.current?.()
     vadStopRef.current = null
     if (mediaRecorderRef.current?.state === 'recording') {
-      // A manual Stop click during a hands-free (Jarvis) recording always
+      // A manual Stop click during a hands-free recording always
       // means "cancel this turn", even if the user had started speaking —
       // routed through the same "no speech heard" bail-out onstop already
       // has for VAD giving up, skipping transcription entirely. Without
       // this, stopping mid-turn still transcribed whatever was captured so
-      // far, sending an unwanted partial message whose reply (Jarvis still
+      // far, sending an unwanted partial message whose reply (hands-free still
       // on) reopened the mic again — the exact "stop doesn't stop, it
       // reopens" loop this fixes. This is a deliberate hands-free-only
       // override, separate from the general "was anything actually said"
@@ -968,7 +968,7 @@ export default function ChatWindow({
   // (rather than the individual isTranscribing/sending flags — see that
   // state's own comment for why) cover a hands-free turn end to end; isSpeaking
   // is still needed on top of those for one edge case they don't cover: a
-  // MANUALLY push-to-talk-recorded message while Jarvis mode also happens
+  // MANUALLY push-to-talk-recorded message while hands-free mode also happens
   // to be enabled doesn't set voiceTurnActive at all, so without isSpeaking
   // here the listener would re-arm and could pick up Sofii's own spoken
   // reply to that manual message. Re-arms once whichever of these caused
@@ -1123,13 +1123,13 @@ export default function ChatWindow({
           )}
         </AnimatePresence>
         <ModelPicker model={model} onChange={setModel} />
-        <Tooltip label={wakeWordEnabled ? 'Jarvis mode on — say "Sofii" anytime' : 'Enable Jarvis mode'}>
+        <Tooltip label={wakeWordEnabled ? 'SOFII mode on — just say “Sofii” anytime, no clicking' : 'Enable SOFII mode — hands-free, always listening for your voice'}>
           <motion.button
             whileTap={reducedMotion ? undefined : { scale: 0.94 }}
             onClick={() => {
               setWakeWordEnabled((prev) => {
                 const next = !prev
-                // Hands-free replies need to be audible — enabling Jarvis
+                // Hands-free replies need to be audible — enabling hands-free
                 // mode turns speech on too rather than leaving a silent
                 // hands-free loop that only works if the toggle happened to
                 // already be on.
@@ -1137,7 +1137,7 @@ export default function ChatWindow({
                 return next
               })
             }}
-            aria-label="Toggle Jarvis hands-free mode"
+            aria-label="Toggle SOFII hands-free mode"
             className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition sm:px-3 ${
               wakeWordEnabled
                 ? 'text-[var(--accent-gradient-text)]'
@@ -1146,7 +1146,7 @@ export default function ChatWindow({
             style={wakeWordEnabled ? { background: 'var(--accent-gradient)' } : undefined}
           >
             <Wand2 size={13} />
-            <span className="hidden sm:inline">Jarvis</span>
+            <span className="hidden sm:inline">SOFII</span>
           </motion.button>
         </Tooltip>
         <Tooltip label={speakEnabled ? 'Spoken replies on' : 'Spoken replies off'}>
@@ -1350,14 +1350,7 @@ export default function ChatWindow({
                   </div>
                 ) : (
                   <div className="flex max-w-[90%] gap-3">
-                    <div
-                      aria-hidden="true"
-                      className="mt-0.5 h-7 w-7 shrink-0 rounded-full"
-                      style={{
-                        background: 'var(--accent-gradient)',
-                        boxShadow: 'var(--avatar-glow-sm)'
-                      }}
-                    />
+                    <div aria-hidden="true" className="assistant-avatar mt-0.5 h-7 w-7 shrink-0 rounded-full" />
                     <div className="min-w-0 flex-1">
                       {m.image_url && (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -1375,7 +1368,9 @@ export default function ChatWindow({
                         </div>
                       ) : (
                         <>
-                          <AssistantContent content={m.content} />
+                          <div className="assistant-surface">
+                            <AssistantContent content={m.content} />
+                          </div>
                           <ContextSourcesPanel sources={m.context_sources} />
                         </>
                       )}
@@ -1475,7 +1470,7 @@ export default function ChatWindow({
         {isRecording && micStream && (
           // Fixed, viewport-centered overlay (not just centered within the
           // composer strip) — a full "voice mode" takeover like Gemini
-          // Live/Jarvis, not a small inline indicator.
+          // Live/hands-free, not a small inline indicator.
           <motion.div
             initial={reducedMotion ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}

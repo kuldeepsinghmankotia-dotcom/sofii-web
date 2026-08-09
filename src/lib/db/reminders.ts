@@ -76,3 +76,24 @@ export async function deleteReminder(supabase: Client, id: string): Promise<void
   const { error } = await supabase.from('reminders').delete().eq('id', id)
   if (error) throw error
 }
+
+// Reschedules a pending reminder. Scoped to status='pending' as well as
+// id: a reminder that already fired shouldn't be silently resurrected by
+// moving its time — the user should create a new one instead, which is
+// clearer about what will actually happen.
+export async function rescheduleReminder(
+  supabase: Client,
+  reminderId: string,
+  scheduledAt: string
+): Promise<Reminder | null> {
+  const { data, error } = await supabase
+    .from('reminders')
+    .update({ scheduled_at: scheduledAt })
+    .eq('id', reminderId)
+    .eq('status', 'pending')
+    .select('id, content, scheduled_at, status')
+    .maybeSingle()
+
+  if (error) throw error
+  return data as Reminder | null
+}

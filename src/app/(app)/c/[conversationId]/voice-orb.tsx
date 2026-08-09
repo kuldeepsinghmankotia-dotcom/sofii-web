@@ -65,7 +65,7 @@ export default function VoiceOrb({
 
       angle += reducedMotion ? 0 : 0.02
 
-      // Jarvis-style rings: two arcs, counter-rotating, independent of
+      // SOFII-style rings: two arcs, counter-rotating, independent of
       // amplitude (ambient motion) so the orb never looks fully static
       // between spikes of speech.
       const scale = SIZE / DEFAULT_SIZE

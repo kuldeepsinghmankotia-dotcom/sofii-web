@@ -136,3 +136,53 @@ export async function createCalendarEvent(
 
   return toCalendarEvent(await response.json())
 }
+
+// PATCH, not PUT: Google's API replaces the whole event on PUT, so a
+// partial update (just moving the time) would silently blank out the
+// description, attendees and everything else the caller didn't resend.
+export async function updateCalendarEvent(
+  accessToken: string,
+  eventId: string,
+  params: { summary?: string; startIso?: string; endIso?: string; description?: string }
+): Promise<CalendarEvent> {
+  const body: Record<string, unknown> = {}
+  if (params.summary !== undefined) body.summary = params.summary
+  if (params.description !== undefined) body.description = params.description
+  if (params.startIso) body.start = { dateTime: params.startIso }
+  if (params.endIso) body.end = { dateTime: params.endIso }
+
+  const response = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error(
+      `Google Calendar update event failed with status ${response.status}: ${await response.text()}`
+    )
+  }
+
+  return toCalendarEvent(await response.json())
+}
+
+export async function deleteCalendarEvent(accessToken: string, eventId: string): Promise<void> {
+  const response = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`,
+    { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } }
+  )
+
+  // 410 Gone means it was already deleted — the caller's intent is
+  // satisfied either way, so this isn't an error worth surfacing.
+  if (!response.ok && response.status !== 410) {
+    throw new Error(
+      `Google Calendar delete event failed with status ${response.status}: ${await response.text()}`
+    )
+  }
+}

@@ -472,3 +472,87 @@ body {
 .hljs-operator {
   color: var(--text-muted);
 }
+
+/* ---- Chat surface polish ----------------------------------------------
+   Assistant replies previously sat as bare text directly on the page
+   background while user messages had a filled bubble, so a long
+   conversation read as one undifferentiated column with occasional tinted
+   blocks. Giving the assistant its own subtle surface establishes a real
+   two-voice rhythm without the heavy "both sides bubbled" look that makes
+   long technical answers (code, tables) feel cramped. */
+.assistant-surface {
+  position: relative;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  padding: 0.875rem 1.125rem;
+  /* Squared off on the top-left only, mirroring the user bubble's
+     squared top-right — the two shapes read as facing each other. */
+  border-top-left-radius: var(--radius-sm);
+  transition: border-color 0.2s ease;
+}
+.assistant-surface:hover {
+  border-color: var(--border-strong);
+}
+
+/* A hairline of brand gradient down the left edge — enough to mark "this
+   is Sofii speaking" at a glance when scrolling fast, without the cost of
+   a fully saturated bubble behind a wall of text. */
+.assistant-surface::before {
+  content: '';
+  position: absolute;
+  top: 0.75rem;
+  bottom: 0.75rem;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent-gradient);
+  opacity: 0.55;
+}
+
+/* The avatar gets a soft halo rather than a hard ring so it reads as lit
+   from within, matching the home hero's treatment. */
+.assistant-avatar {
+  position: relative;
+  background: var(--accent-gradient);
+  box-shadow: var(--avatar-glow-sm);
+}
+
+/* Code blocks inside an assistant surface sit on an already-tinted
+   background, so they need their own slightly deeper ground to stay
+   legible as a distinct element rather than blending into the card. */
+.assistant-surface .code-block {
+  background: var(--surface-input-strong);
+  border-color: var(--border);
+}
+
+/* Tables were previously unstyled beyond markdown defaults and ran edge
+   to edge; on a narrow column that produced horizontal overflow with no
+   affordance. */
+.md table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.9em;
+}
+.md th,
+.md td {
+  border: 1px solid var(--border);
+  padding: 0.4em 0.65em;
+  text-align: left;
+}
+.md th {
+  background: var(--surface-active);
+  font-weight: 600;
+}
+
+/* Blockquotes read as asides, matching the accent language used elsewhere
+   rather than the browser's default grey bar. */
+.md blockquote {
+  margin: 0.6em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-muted);
+}

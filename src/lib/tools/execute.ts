@@ -1,11 +1,25 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
-import { createMemory } from '@/lib/db/memories'
-import { createReminder, listPendingReminders } from '@/lib/db/reminders'
+import { createMemory, deleteMemory, listMemories, updateMemory } from '@/lib/db/memories'
+import {
+  cancelReminder,
+  createReminder,
+  listPendingReminders,
+  rescheduleReminder
+} from '@/lib/db/reminders'
 import { getWeather } from '@/lib/weather/weather'
 import { searchWeb } from '@/lib/search/tavily'
-import { createCalendarEvent, getValidAccessToken, listUpcomingEvents } from '@/lib/google/calendar'
+import {
+  createCalendarEvent,
+  deleteCalendarEvent,
+  getValidAccessToken,
+  listUpcomingEvents,
+  updateCalendarEvent
+} from '@/lib/google/calendar'
 import { recallRelatedMessagesByText } from '@/lib/db/message-embeddings'
+import { calculate } from './calculate'
+import { readWebpage } from './read-webpage'
+import { saveNoteAsDocument, searchEverything } from './knowledge'
 
 const CALENDAR_NOT_CONNECTED =
   'Google Calendar is not connected. Tell the user to connect it on the Calendar page.'
@@ -122,8 +136,10 @@ export async function executeToolCall(
       const pending = await listPendingReminders(supabase)
       if (pending.length === 0) return 'No upcoming reminders.'
 
+      // ids are included because cancel_reminder/reschedule_reminder need
+      // them and must never guess one.
       return pending
-        .map((r) => `- "${r.content}" at ${new Date(r.scheduled_at).toLocaleString()}`)
+        .map((r) => `- [id: ${r.id}] "${r.content}" at ${new Date(r.scheduled_at).toLocaleString()}`)
         .join('\n')
     }
 
@@ -159,8 +175,10 @@ export async function executeToolCall(
         const events = await listUpcomingEvents(accessToken)
         if (events.length === 0) return 'No upcoming calendar events.'
 
+        // ids are included because update_calendar_event and
+        // delete_calendar_event need them and must never guess one.
         return events
-          .map((e) => `- "${e.summary}" at ${new Date(e.start).toLocaleString()}`)
+          .map((e) => `- [id: ${e.id}] "${e.summary}" at ${new Date(e.start).toLocaleString()}`)
           .join('\n')
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -228,6 +246,179 @@ export async function executeToolCall(
         documentIds: [documentId],
         intent: 'extract_structured_data'
       })
+    }
+
+    case 'cancel_reminder': {
+      const reminderId = typeof args.reminder_id === 'string' ? args.reminder_id.trim() : ''
+      if (!reminderId) return 'Error: reminder_id is required.'
+
+      try {
+        await cancelReminder(supabase, reminderId)
+        return 'Reminder cancelled.'
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Error cancelling reminder: ${message}`
+      }
+    }
+
+    case 'reschedule_reminder': {
+      const reminderId = typeof args.reminder_id === 'string' ? args.reminder_id.trim() : ''
+      const scheduledAtIso = typeof args.scheduled_at_iso === 'string' ? args.scheduled_at_iso : ''
+      if (!reminderId) return 'Error: reminder_id is required.'
+
+      const scheduledAt = Date.parse(scheduledAtIso)
+      if (Number.isNaN(scheduledAt)) return `Error: could not parse "${scheduledAtIso}" as a date.`
+
+      try {
+        const updated = await rescheduleReminder(
+          supabase,
+          reminderId,
+          new Date(scheduledAt).toISOString()
+        )
+        if (!updated) {
+          return 'That reminder could not be rescheduled — it may have already fired or been cancelled. Suggest creating a new one instead.'
+        }
+        return `Reminder moved to ${new Date(updated.scheduled_at).toLocaleString()}.`
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Error rescheduling reminder: ${message}`
+      }
+    }
+
+    case 'list_memories': {
+      const memories = await listMemories(supabase)
+      if (memories.length === 0) return 'No stored memories yet.'
+
+      return memories.map((m) => `- [id: ${m.id}] ${m.content}`).join('\n')
+    }
+
+    case 'update_memory': {
+      const memoryId = typeof args.memory_id === 'string' ? args.memory_id.trim() : ''
+      const content = typeof args.content === 'string' ? args.content.trim() : ''
+      if (!memoryId) return 'Error: memory_id is required.'
+      if (!content) return 'Error: content is required.'
+
+      try {
+        await updateMemory(supabase, memoryId, content)
+        return `Memory updated to: "${content}".`
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Error updating memory: ${message}`
+      }
+    }
+
+    case 'forget_memory': {
+      const memoryId = typeof args.memory_id === 'string' ? args.memory_id.trim() : ''
+      if (!memoryId) return 'Error: memory_id is required.'
+
+      try {
+        await deleteMemory(supabase, memoryId)
+        return 'Memory forgotten.'
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Error forgetting memory: ${message}`
+      }
+    }
+
+    case 'read_webpage': {
+      const url = typeof args.url === 'string' ? args.url.trim() : ''
+      if (!url) return 'Error: url is required.'
+
+      try {
+        const page = await readWebpage(url)
+        const header = page.title ? `Title: ${page.title}\nURL: ${page.url}` : `URL: ${page.url}`
+        const footer = page.truncated ? '\n\n[Page truncated — this is the beginning only.]' : ''
+        return `${header}\n\n${page.text}${footer}`
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Could not read that page: ${message}. Tell the user honestly rather than inventing its contents.`
+      }
+    }
+
+    case 'calculate': {
+      const expression = typeof args.expression === 'string' ? args.expression.trim() : ''
+      if (!expression) return 'Error: expression is required.'
+
+      try {
+        return `${expression} = ${calculate(expression)}`
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Could not evaluate "${expression}": ${message}`
+      }
+    }
+
+    case 'save_note': {
+      const title = typeof args.title === 'string' ? args.title.trim() : ''
+      const content = typeof args.content === 'string' ? args.content.trim() : ''
+      if (!title) return 'Error: title is required.'
+      if (!content) return 'Error: content is required.'
+
+      try {
+        const saved = await saveNoteAsDocument(supabase, userId, title, content)
+        return `Saved as "${saved.filename}" in the user's documents (${saved.chunkCount} section${saved.chunkCount === 1 ? '' : 's'}). It's searchable from any future conversation.`
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Error saving note: ${message}`
+      }
+    }
+
+    case 'search_everything': {
+      const query = typeof args.query === 'string' ? args.query.trim() : ''
+      if (!query) return 'Error: query is required.'
+
+      return searchEverything(
+        supabase,
+        query,
+        // Same nil-UUID sentinel as recall_past_conversations — see that
+        // case for why a real UUID shape is required here.
+        context?.conversationId ?? '00000000-0000-0000-0000-000000000000'
+      )
+    }
+
+    case 'update_calendar_event': {
+      const eventId = typeof args.event_id === 'string' ? args.event_id.trim() : ''
+      if (!eventId) return 'Error: event_id is required.'
+
+      const startIso = typeof args.start_iso === 'string' ? args.start_iso : undefined
+      const endIso = typeof args.end_iso === 'string' ? args.end_iso : undefined
+      if (startIso && Number.isNaN(Date.parse(startIso))) {
+        return `Error: could not parse "${startIso}" as a date.`
+      }
+      if (endIso && Number.isNaN(Date.parse(endIso))) {
+        return `Error: could not parse "${endIso}" as a date.`
+      }
+
+      try {
+        const accessToken = await getValidAccessToken(supabase)
+        if (!accessToken) return CALENDAR_NOT_CONNECTED
+
+        const event = await updateCalendarEvent(accessToken, eventId, {
+          summary: typeof args.summary === 'string' ? args.summary : undefined,
+          description: typeof args.description === 'string' ? args.description : undefined,
+          startIso,
+          endIso
+        })
+        return `Calendar event updated: "${event.summary}" at ${new Date(event.start).toLocaleString()}.`
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Error updating calendar event: ${message}`
+      }
+    }
+
+    case 'delete_calendar_event': {
+      const eventId = typeof args.event_id === 'string' ? args.event_id.trim() : ''
+      if (!eventId) return 'Error: event_id is required.'
+
+      try {
+        const accessToken = await getValidAccessToken(supabase)
+        if (!accessToken) return CALENDAR_NOT_CONNECTED
+
+        await deleteCalendarEvent(accessToken, eventId)
+        return 'Calendar event deleted.'
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return `Error deleting calendar event: ${message}`
+      }
     }
 
     case 'recall_past_conversations': {
