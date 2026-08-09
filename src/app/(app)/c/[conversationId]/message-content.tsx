@@ -4,7 +4,8 @@ import { isValidElement, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { Check, Copy, Share2 } from 'lucide-react'
+import { Check, Copy, GitBranch, Share2 } from 'lucide-react'
+import { Tooltip } from '../../tooltip'
 
 export function CopyButton({ content, label }: { content: string; label?: string }) {
   const [copied, setCopied] = useState(false)
@@ -109,6 +110,45 @@ function CodeBlock({ children }: { children?: ReactNode }) {
       </div>
       <pre ref={preRef}>{children}</pre>
     </div>
+  )
+}
+
+/**
+ * Forks the conversation from this message into a new thread. Shows a
+ * pending state because branching copies every prior message server-side,
+ * which is not instant on a long conversation, and a silent multi-second
+ * gap before the route change would read as a dead button.
+ */
+export function BranchButton({
+  messageId,
+  onBranch
+}: {
+  messageId: string
+  onBranch: (messageId: string) => Promise<void>
+}) {
+  const [branching, setBranching] = useState(false)
+
+  const handleClick = async (): Promise<void> => {
+    setBranching(true)
+    try {
+      await onBranch(messageId)
+    } finally {
+      setBranching(false)
+    }
+  }
+
+  return (
+    <Tooltip label="Branch a new conversation from here — the original stays as it is">
+      <button
+        onClick={() => void handleClick()}
+        disabled={branching}
+        aria-label="Branch conversation from this message"
+        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-button-hover)] hover:text-[var(--text)] disabled:opacity-60"
+      >
+        <GitBranch size={13} />
+        {branching ? 'Branching…' : 'Branch'}
+      </button>
+    </Tooltip>
   )
 }
 

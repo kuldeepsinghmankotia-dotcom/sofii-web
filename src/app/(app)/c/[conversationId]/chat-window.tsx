@@ -51,7 +51,7 @@ import {
 } from '@/lib/voice/select-voice'
 import { fetchCloudSpeech, supportsCloudVoice } from '@/lib/voice/cloud-tts'
 import VoiceOrb from './voice-orb'
-import { CopyButton, ShareButton, AssistantContent } from './message-content'
+import { CopyButton, ShareButton, AssistantContent, BranchButton } from './message-content'
 import { ContextSourcesPanel } from './context-sources-panel'
 import { notifyConversationsChanged } from '../../sidebar'
 import { Tooltip } from '../../tooltip'
@@ -552,6 +552,29 @@ export default function ChatWindow({
 
   const handleStop = (): void => {
     abortControllerRef.current?.abort()
+  }
+
+  // Forks this conversation at a given message into a new thread, leaving
+  // the original completely untouched — the point is to explore an
+  // alternative direction without destroying the path that got you here
+  // (which is what editing or regenerating in place does).
+  const branchFrom = async (messageId: string): Promise<void> => {
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/branch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId })
+      })
+      if (!response.ok) throw new Error(await response.text())
+
+      const { conversationId: branchId } = (await response.json()) as { conversationId: string }
+      notifyConversationsChanged()
+      toast.success('Branched — the original conversation is unchanged.')
+      router.push(`/c/${branchId}`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error(`Could not branch: ${message}`)
+    }
   }
 
   // Feeds an already-uploaded chat image into the real ingestion/OCR
@@ -1364,6 +1387,9 @@ export default function ChatWindow({
                         )}
                         <CopyButton content={m.content} />
                         {!isStreamingPlaceholder && <ShareButton content={m.content} />}
+                        {!isStreamingPlaceholder && (
+                          <BranchButton messageId={m.id} onBranch={branchFrom} />
+                        )}
                         {isLastAssistantReply && (
                           <Tooltip label="Regenerate">
                             <button
