@@ -52,6 +52,7 @@ import {
 import { fetchCloudSpeech, supportsCloudVoice } from '@/lib/voice/cloud-tts'
 import VoiceOrb from './voice-orb'
 import { CopyButton, ShareButton, AssistantContent } from './message-content'
+import { ContextSourcesPanel } from './context-sources-panel'
 import { notifyConversationsChanged } from '../../sidebar'
 import { Tooltip } from '../../tooltip'
 import { ModelPicker, useSelectedModel, MODEL_INFO, type ModelChoice } from '../../model-picker'
@@ -508,6 +509,37 @@ export default function ChatWindow({
           prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + chunk } : m))
         )
       }
+
+      // Pull this reply's provenance ("why this answer") once streaming
+      // finishes. Deliberately not a response header: tool calls happen
+      // DURING streaming, long after headers are flushed, so the server
+      // can't know the full source list up front. Read straight through
+      // the RLS-scoped Supabase client rather than adding an endpoint —
+      // the row is the user's own, and this is exactly what RLS is for.
+      // Best-effort: on failure the panel simply appears after a reload
+      // instead, since the sources are persisted on the message either way.
+      void (async () => {
+        try {
+          const supabase = createClient()
+          const { data } = await supabase
+            .from('messages')
+            .select('context_sources')
+            .eq('conversation_id', conversationId)
+            .eq('role', 'assistant')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+          const sources = data?.context_sources as ChatMessage['context_sources']
+          if (sources) {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, context_sources: sources } : m))
+            )
+          }
+        } catch (error) {
+          console.error('Could not load reply sources:', error)
+        }
+      })()
 
       return { content: fullContent, ok: true }
     } catch (err) {
@@ -1319,7 +1351,10 @@ export default function ChatWindow({
                           <span />
                         </div>
                       ) : (
-                        <AssistantContent content={m.content} />
+                        <>
+                          <AssistantContent content={m.content} />
+                          <ContextSourcesPanel sources={m.context_sources} />
+                        </>
                       )}
                       <div className="mt-1 flex items-center gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
                         {!isStreamingPlaceholder && (

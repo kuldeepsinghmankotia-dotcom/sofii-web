@@ -286,6 +286,7 @@ export type Database = {
       messages: {
         Row: {
           content: string
+          context_sources: Json | null
           conversation_id: string
           created_at: string
           embedding: string | null
@@ -296,6 +297,7 @@ export type Database = {
         }
         Insert: {
           content: string
+          context_sources?: Json | null
           conversation_id: string
           created_at?: string
           embedding?: string | null
@@ -306,6 +308,7 @@ export type Database = {
         }
         Update: {
           content?: string
+          context_sources?: Json | null
           conversation_id?: string
           created_at?: string
           embedding?: string | null

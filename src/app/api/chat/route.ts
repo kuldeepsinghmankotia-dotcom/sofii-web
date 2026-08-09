@@ -23,6 +23,13 @@ import { rankMemoriesByRelevance } from '@/lib/memory/ranking'
 import { extractMemoryCandidate } from '@/lib/memory/extract'
 import { listDocuments, matchDocumentChunks } from '@/lib/db/documents'
 import { embedMessages, recallRelatedMessages } from '@/lib/db/message-embeddings'
+import {
+  hasAnySource,
+  summarizeToolResult,
+  truncateSnippet,
+  type ContextSources,
+  type ToolSource
+} from '@/lib/db/context-sources'
 import { embedText } from '@/lib/gemini/embeddings'
 import {
   fetchImageAsInlineData,
@@ -363,6 +370,39 @@ export async function POST(request: NextRequest): Promise<Response> {
     ? await recallRelatedMessages(supabase, queryEmbedding, conversationId, CONVERSATION_RECALL_LIMIT)
     : []
 
+  // Provenance for this reply — what the model was actually shown, so the
+  // user can check whether an answer came from a real stored fact, a
+  // document, something said weeks ago, or the model's own knowledge.
+  // Snapshotted here (not joined at render time) so the panel keeps
+  // showing what was true at the time even if the memory is later edited
+  // or the document deleted — see lib/db/context-sources.ts.
+  const contextSources: ContextSources = {}
+
+  if (relevantMemories.length > 0) {
+    contextSources.memories = relevantMemories.map((m) => ({
+      id: m.id,
+      content: truncateSnippet(m.content)
+    }))
+  }
+
+  if (relevantChunks.length > 0) {
+    const filenameById = new Map(userDocuments.map((d) => [d.id, d.filename]))
+    contextSources.documents = relevantChunks.map((c) => ({
+      document_id: c.document_id,
+      filename: filenameById.get(c.document_id) ?? 'Document',
+      snippet: truncateSnippet(c.content)
+    }))
+  }
+
+  if (recalledMessages.length > 0) {
+    contextSources.conversations = recalledMessages.map((m) => ({
+      conversation_id: m.conversation_id,
+      title: m.conversation_title,
+      created_at: m.created_at,
+      snippet: truncateSnippet(m.content)
+    }))
+  }
+
   // The model needs "now" to resolve relative times ("in 10 minutes",
   // "tomorrow at 5pm") into the absolute ISO timestamp create_reminder needs.
   const activeSystemPrompt = await getActiveSystemPrompt(supabase)
@@ -426,6 +466,23 @@ export async function POST(request: NextRequest): Promise<Response> {
     image_url: effectiveImageUrl ?? null
   }
   const conversationMessages = regenerate ? history : [...history, currentMessage]
+
+  // Wraps executeToolCall so every tool invocation is recorded into this
+  // reply's provenance, whichever of the three model branches below runs
+  // it (Gemini, Groq-with-vision, plain Groq) — recording at each call
+  // site separately would be three chances to forget one.
+  const toolSources: ToolSource[] = []
+  const runTool = async (toolCall: { name: string; argumentsJson: string }): Promise<string> => {
+    const result = await executeToolCall(
+      { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
+      supabase,
+      user.id,
+      { conversationId }
+    )
+    toolSources.push({ name: toolCall.name, summary: summarizeToolResult(result) })
+    return result
+  }
+
   const usesVision = !!effectiveImageUrl
   // Gemini is natively multimodal (no separate vision model needed like
   // Groq's VISION_MODEL fallback), so only Groq's branch needs usesVision to
@@ -493,12 +550,7 @@ export async function POST(request: NextRequest): Promise<Response> {
                     name: toolCall.name,
                     id: toolCall.id,
                     response: {
-                      result: await executeToolCall(
-                        { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
-                        supabase,
-                        user.id,
-                        { conversationId }
-                      )
+                      result: await runTool(toolCall)
                     }
                   }
                 }))
@@ -601,12 +653,7 @@ export async function POST(request: NextRequest): Promise<Response> {
                 toolCalls.map(async (toolCall) => ({
                   role: 'tool' as const,
                   tool_call_id: toolCall.id,
-                  content: await executeToolCall(
-                    { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
-                    supabase,
-                    user.id,
-                    { conversationId }
-                  )
+                  content: await runTool(toolCall)
                 }))
               )
 
@@ -640,12 +687,7 @@ export async function POST(request: NextRequest): Promise<Response> {
                 toolCalls.map(async (toolCall) => ({
                   role: 'tool' as const,
                   tool_call_id: toolCall.id,
-                  content: await executeToolCall(
-                    { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
-                    supabase,
-                    user.id,
-                    { conversationId }
-                  )
+                  content: await runTool(toolCall)
                 }))
               )
 
@@ -689,11 +731,16 @@ export async function POST(request: NextRequest): Promise<Response> {
       if (fullContent) {
         let insertedAssistantMessageId: string | null = null
         const persistReply = async (): Promise<void> => {
+          // Tool sources are only known now — the tools ran during
+          // streaming, after the rest of contextSources was assembled.
+          if (toolSources.length > 0) contextSources.tools = toolSources
+
           const inserted = await insertMessage(supabase, {
             conversationId,
             userId: user.id,
             role: 'assistant',
-            content: fullContent
+            content: fullContent,
+            contextSources: hasAnySource(contextSources) ? contextSources : null
           })
           insertedAssistantMessageId = inserted.id
           await touchConversation(supabase, conversationId)
