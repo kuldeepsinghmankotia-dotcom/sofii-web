@@ -16,10 +16,16 @@ describe('supportsCloudVoice', () => {
     expect(supportsCloudVoice('ar-SA')).toBe(true)
   })
 
-  it('does not support other languages', () => {
-    expect(supportsCloudVoice('hi-IN')).toBe(false)
-    expect(supportsCloudVoice('zh-CN')).toBe(false)
-    expect(supportsCloudVoice('fr-FR')).toBe(false)
+  it('supports the broader ElevenLabs-covered languages', () => {
+    expect(supportsCloudVoice('hi-IN')).toBe(true)
+    expect(supportsCloudVoice('zh-CN')).toBe(true)
+    expect(supportsCloudVoice('fr-FR')).toBe(true)
+    expect(supportsCloudVoice('ru-RU')).toBe(true)
+  })
+
+  it('does not support a language neither provider covers', () => {
+    expect(supportsCloudVoice('sw-KE')).toBe(false) // Swahili
+    expect(supportsCloudVoice('xx')).toBe(false)
   })
 })
 
