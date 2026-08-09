@@ -46,7 +46,8 @@ import {
   loadVoices,
   pickBestVoice,
   SPEECH_PITCH,
-  SPEECH_RATE
+  SPEECH_RATE,
+  stripEmojisForSpeech
 } from '@/lib/voice/select-voice'
 import { fetchCloudSpeech, supportsCloudVoice } from '@/lib/voice/cloud-tts'
 import VoiceOrb from './voice-orb'
@@ -96,9 +97,12 @@ const MAX_WAIT_FOR_SPEECH_MS = 6000
  * Lightweight energy-based voice-activity detection: watches live mic
  * amplitude and calls back once the user has spoken and then gone quiet for
  * SILENCE_TO_STOP_MS, or gives up after MAX_WAIT_FOR_SPEECH_MS of hearing
- * nothing at all. This is what lets hands-free mode work without a Stop
- * button — manual push-to-talk recording doesn't use this at all, so its
- * existing explicit-Stop behavior is unchanged.
+ * nothing at all. Runs for every recording, hands-free or manual push-to-
+ * talk — a manual recording that's never explicitly stopped now auto-stops
+ * itself the same way, rather than recording indefinitely until the user
+ * remembers to click Stop. The explicit Stop button/click still works
+ * exactly as before either way; this only adds a second way a recording
+ * can end.
  */
 function attachSilenceAutoStop(
   stream: MediaStream,
@@ -324,14 +328,20 @@ export default function ChatWindow({
   // this file's established `void someAsyncCall()` convention elsewhere) —
   // the voice lookup below is awaited internally instead.
   const speak = (text: string, onEnd?: () => void): void => {
-    if (!speakEnabled || !text.trim()) {
+    // Stripped once, up front, and used for everything below (language
+    // detection, both TTS paths) — a TTS engine reading emoji literally
+    // (announcing "waving hand emoji" or garbling a pronunciation attempt)
+    // reads as broken, not expressive. A reply that was emoji-only becomes
+    // empty here and is correctly treated the same as no reply at all.
+    const spokenText = stripEmojisForSpeech(text)
+    if (!speakEnabled || !spokenText) {
       onEnd?.()
       return
     }
     stopAnySpeech()
 
     void (async () => {
-      const lang = detectSpeechLanguage(text)
+      const lang = detectSpeechLanguage(spokenText)
 
       // Cloud TTS (Groq-hosted Orpheus) first, for the languages it
       // covers — genuinely natural neural voice quality, not just "the
@@ -340,7 +350,7 @@ export default function ChatWindow({
       // gate not cleared yet, rate limiting) rather than ever being a dead
       // end for spoken replies.
       if (supportsCloudVoice(lang)) {
-        const audioBlob = await fetchCloudSpeech(text, lang)
+        const audioBlob = await fetchCloudSpeech(spokenText, lang)
         if (audioBlob) {
           const url = URL.createObjectURL(audioBlob)
           const audio = new Audio(url)
@@ -364,7 +374,7 @@ export default function ChatWindow({
         }
       }
 
-      const utterance = new SpeechSynthesisUtterance(text)
+      const utterance = new SpeechSynthesisUtterance(spokenText)
       // Matches the utterance to an actual installed voice for whatever
       // language it's speaking, instead of the browser's single unnamed
       // default (previously never set at all — every reply, in every
@@ -695,7 +705,7 @@ export default function ChatWindow({
     // drops this back to passive wake-word listening on its own.
     speak(fullContent, () => {
       if (wakeWordEnabled && options?.fromHandsFree) {
-        void startRecording({ autoStopOnSilence: true })
+        void startRecording({ handsFree: true })
       } else {
         setVoiceTurnActive(false)
       }
@@ -727,7 +737,14 @@ export default function ChatWindow({
     }
   }
 
-  const startRecording = async (options?: { autoStopOnSilence?: boolean }): Promise<void> => {
+  // handsFree covers voiceTurnActive/auto-continue-after-reply behavior
+  // only — silence-based auto-stop itself (attachSilenceAutoStop below) now
+  // runs for every recording, manual push-to-talk included. It used to be
+  // gated behind this same flag, which meant clicking the mic button
+  // manually never auto-stopped at all: the recording just ran until the
+  // user clicked Stop themselves, regardless of how long they'd already
+  // finished talking.
+  const startRecording = async (options?: { handsFree?: boolean }): Promise<void> => {
     // Set here (covering every hands-free recording, whatever triggered
     // it — wake word, or an auto-continue after a reply to a typed
     // message while Jarvis mode happens to be on) rather than only where
@@ -735,8 +752,8 @@ export default function ChatWindow({
     // specific recording's later transcribing/sending stage isn't covered
     // by voiceTurnActive, letting the wake-word listener incorrectly
     // re-arm mid-turn.
-    if (options?.autoStopOnSilence) setVoiceTurnActive(true)
-    activeRecordingIsHandsFreeRef.current = !!options?.autoStopOnSilence
+    if (options?.handsFree) setVoiceTurnActive(true)
+    activeRecordingIsHandsFreeRef.current = !!options?.handsFree
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -795,7 +812,7 @@ export default function ChatWindow({
             // it whether it's allowed to auto-continue afterward — only
             // true for a wake-word-triggered or auto-continued recording,
             // never a manual push-to-talk one.
-            await sendMessage(text.trim(), { fromHandsFree: !!options?.autoStopOnSilence })
+            await sendMessage(text.trim(), { fromHandsFree: !!options?.handsFree })
           } else {
             setVoiceTurnActive(false)
           }
@@ -812,15 +829,15 @@ export default function ChatWindow({
       recorder.start()
       setIsRecording(true)
 
-      if (options?.autoStopOnSilence) {
-        vadStopRef.current = attachSilenceAutoStop(stream, (heardSpeech) => {
-          heardSpeechRef.current = heardSpeech
-          if (mediaRecorderRef.current?.state === 'recording') {
-            mediaRecorderRef.current.stop()
-          }
-          setIsRecording(false)
-        })
-      }
+      // Runs for every recording now, not just hands-free ones — see this
+      // function's own comment.
+      vadStopRef.current = attachSilenceAutoStop(stream, (heardSpeech) => {
+        heardSpeechRef.current = heardSpeech
+        if (mediaRecorderRef.current?.state === 'recording') {
+          mediaRecorderRef.current.stop()
+        }
+        setIsRecording(false)
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       toast.error(`Microphone unavailable: ${message}`)
@@ -922,7 +939,7 @@ export default function ChatWindow({
           setIsWakeListening(false)
           // startRecording itself sets voiceTurnActive when
           // autoStopOnSilence is requested — see its own comment.
-          void startRecording({ autoStopOnSilence: true })
+          void startRecording({ handsFree: true })
         } else {
           arm()
         }

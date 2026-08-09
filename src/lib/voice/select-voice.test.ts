@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { detectScriptLanguage, detectSpeechLanguage, keepSpeechAlive, pickBestVoice } from './select-voice'
+import {
+  detectScriptLanguage,
+  detectSpeechLanguage,
+  keepSpeechAlive,
+  pickBestVoice,
+  stripEmojisForSpeech
+} from './select-voice'
 
 function voice(overrides: Partial<SpeechSynthesisVoice>): SpeechSynthesisVoice {
   return {
@@ -45,6 +51,56 @@ describe('detectSpeechLanguage', () => {
   it('falls back to en-US when navigator.language is unavailable', () => {
     vi.stubGlobal('navigator', {})
     expect(detectSpeechLanguage('Hello there')).toBe('en-US')
+  })
+})
+
+describe('stripEmojisForSpeech', () => {
+  // Every emoji test constant below is built via String.fromCodePoint
+  // rather than embedded as a literal glyph in this file — same reasoning
+  // as select-voice.ts's own ZWJ_CODE_POINT/VARIATION_SELECTOR_16_CODE_POINT
+  // constants: an actual emoji character (and especially a ZWJ/variation
+  // selector inside a compound one) is effectively invisible in a diff.
+  const WAVE = String.fromCodePoint(0x1f44b) // 👋
+  const CHECK = String.fromCodePoint(0x2705) // ✅
+  const ROCKET = String.fromCodePoint(0x1f680) // 🚀
+  const SMILE = String.fromCodePoint(0x1f60a) // 😊
+  const THUMBS_UP = String.fromCodePoint(0x1f44d) // 👍
+
+  it('strips a simple trailing emoji', () => {
+    expect(stripEmojisForSpeech(`Hi there! ${WAVE}`)).toBe('Hi there!')
+  })
+
+  it('strips multiple emoji throughout a sentence', () => {
+    expect(stripEmojisForSpeech(`${CHECK} Great job! Keep it up. ${ROCKET}`)).toBe(
+      'Great job! Keep it up.'
+    )
+  })
+
+  it('strips a ZWJ compound emoji (family/skin-tone sequences) entirely', () => {
+    // U+1F468 U+200D U+1F469 U+200D U+1F467 - man+ZWJ+woman+ZWJ+girl "family"
+    const family = String.fromCodePoint(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467)
+    expect(stripEmojisForSpeech(`Family time ${family} today`)).toBe('Family time today')
+  })
+
+  it('strips flag emoji (regional indicator pairs)', () => {
+    // U+1F1FA U+1F1F8 - regional indicators "U" + "S" = US flag
+    const usFlag = String.fromCodePoint(0x1f1fa, 0x1f1f8)
+    expect(stripEmojisForSpeech(`Shipping to ${usFlag} only`)).toBe('Shipping to only')
+  })
+
+  it('leaves plain punctuation and markdown untouched', () => {
+    const text = 'Here is a **bold** point, and a list:\n- one\n- two'
+    expect(stripEmojisForSpeech(text)).toBe(text)
+  })
+
+  it('returns an empty string when the text is emoji-only', () => {
+    expect(stripEmojisForSpeech(THUMBS_UP)).toBe('')
+  })
+
+  it('collapses the double space left behind after removing a mid-sentence emoji', () => {
+    expect(stripEmojisForSpeech(`Sounds good ${SMILE} see you soon!`)).toBe(
+      'Sounds good see you soon!'
+    )
   })
 })
 

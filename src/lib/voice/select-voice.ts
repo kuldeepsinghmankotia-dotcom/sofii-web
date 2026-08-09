@@ -48,6 +48,37 @@ export function detectScriptLanguage(text: string): string | null {
   return null
 }
 
+// Emoji read literally by a TTS engine reads as broken, not expressive —
+// most either announce the Unicode name ("waving hand emoji") or garble an
+// attempt at pronouncing it. Stripped before either speech path (cloud or
+// browser) ever sees the text; markdown and normal punctuation are left
+// untouched, this only targets actual pictographic code points. Written
+// entirely with \u escapes rather than literal invisible characters
+// (zero-width joiner, variation selector) in the source — those are
+// impossible to visually verify in a diff/review otherwise.
+// Built via String.fromCodePoint rather than embedding the zero-width
+// joiner / variation-selector-16 characters directly in a regex literal —
+// those specific code points are invisible and impossible to tell apart
+// from a plain empty match at a glance in a diff, so this spells them out
+// in plain ASCII (ZWJ_CODE_POINT/VARIATION_SELECTOR_16_CODE_POINT) instead.
+const ZWJ_CODE_POINT = 0x200d
+const VARIATION_SELECTOR_16_CODE_POINT = 0xfe0f
+const zwjEmojiSequence = new RegExp(
+  `\\p{Extended_Pictographic}(${String.fromCodePoint(ZWJ_CODE_POINT)}\\p{Extended_Pictographic})*`,
+  'gu'
+)
+const regionalIndicatorFlagPair = /[\u{1F1E6}-\u{1F1FF}]{2}/gu
+const danglingVariationSelector = new RegExp(String.fromCodePoint(VARIATION_SELECTOR_16_CODE_POINT), 'g')
+
+export function stripEmojisForSpeech(text: string): string {
+  return text
+    .replace(zwjEmojiSequence, '')
+    .replace(regionalIndicatorFlagPair, '')
+    .replace(danglingVariationSelector, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
+}
+
 export function detectSpeechLanguage(text: string): string {
   return (
     detectScriptLanguage(text) ??
