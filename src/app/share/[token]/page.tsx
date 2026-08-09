@@ -55,7 +55,7 @@ export default async function SharedConversationPage({
                 className="mt-0.5 h-7 w-7 shrink-0 rounded-full"
                 style={{
                   background: 'var(--accent-gradient)',
-                  boxShadow: '0 0 14px rgba(139,92,246,0.45)'
+                  boxShadow: 'var(--avatar-glow-sm)'
                 }}
               />
               <div className="min-w-0 flex-1">

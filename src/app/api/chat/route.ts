@@ -22,6 +22,7 @@ import { createMemory, listMemories, recordMemoryUsage } from '@/lib/db/memories
 import { rankMemoriesByRelevance } from '@/lib/memory/ranking'
 import { extractMemoryCandidate } from '@/lib/memory/extract'
 import { listDocuments, matchDocumentChunks } from '@/lib/db/documents'
+import { embedMessages, recallRelatedMessages } from '@/lib/db/message-embeddings'
 import { embedText } from '@/lib/gemini/embeddings'
 import {
   fetchImageAsInlineData,
@@ -52,6 +53,11 @@ type Client = SupabaseClient<Database>
 type ModelChoice = 'groq' | 'gemini'
 const MEMORY_RECALL_LIMIT = 5
 const DOCUMENT_RECALL_LIMIT = 5
+// Deliberately smaller than the other two: past-conversation excerpts are
+// whole messages rather than tight chunks, so each one costs far more
+// context budget, and stale cross-talk is more distracting to the model
+// than a missed recall is harmful.
+const CONVERSATION_RECALL_LIMIT = 3
 
 interface AccumulatedToolCall {
   id: string
@@ -273,6 +279,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   // history row really is the user turn to answer again.
   let effectiveContent: string
   let effectiveImageUrl: string | undefined
+  // Captured so this turn can be embedded for cross-conversation recall
+  // after the reply is sent. Null on regenerate: that path reuses a user
+  // message that already exists (and was already embedded on its original
+  // turn), so re-embedding it would spend quota to write the same vector.
+  let insertedUserMessageId: string | null = null
 
   if (regenerate) {
     const lastUserMessage = [...history].reverse().find((m) => m.role === 'user')
@@ -284,13 +295,14 @@ export async function POST(request: NextRequest): Promise<Response> {
   } else {
     effectiveContent = content!
     effectiveImageUrl = imageUrl
-    await insertMessage(supabase, {
+    const inserted = await insertMessage(supabase, {
       conversationId,
       userId: user.id,
       role: 'user',
       content: effectiveContent,
       imageUrl: effectiveImageUrl
     })
+    insertedUserMessageId = inserted.id
   }
 
   const relevantMemories = rankMemoriesByRelevance(
@@ -314,10 +326,22 @@ export async function POST(request: NextRequest): Promise<Response> {
   // compare_documents/extract_structured_data tools need to reference a
   // specific document by id.
   const userDocuments = await listDocuments(supabase)
+
+  // One embedding of the user's message, reused for both document search
+  // and cross-conversation recall below — embedding the same text twice
+  // per turn would double the latency and API quota for no benefit.
+  let queryEmbedding: number[] | null = null
+  try {
+    queryEmbedding = await embedText(effectiveContent)
+  } catch (error) {
+    // Both recall paths degrade to "no extra context" rather than failing
+    // the chat — a Gemini outage shouldn't take down chat entirely.
+    console.error('Query embedding error:', error)
+  }
+
   let relevantChunks: { document_id: string; content: string }[] = []
-  if (userDocuments.length > 0) {
+  if (userDocuments.length > 0 && queryEmbedding) {
     try {
-      const queryEmbedding = await embedText(effectiveContent)
       relevantChunks = await matchDocumentChunks(
         supabase,
         queryEmbedding,
@@ -325,11 +349,19 @@ export async function POST(request: NextRequest): Promise<Response> {
         effectiveContent
       )
     } catch (error) {
-      // Document recall is a bonus, not a hard dependency — a Gemini outage
-      // shouldn't take down chat entirely.
       console.error('Document recall error:', error)
     }
   }
+
+  // Cross-conversation recall: pulls in what was said about this topic in
+  // the user's OTHER conversations. Without this, every past conversation
+  // is a sealed box — "what did we decide about that last week?" had no
+  // way to find an answer already sitting in the database.
+  // recallRelatedMessages never throws (returns [] on failure), so this
+  // needs no try/catch of its own.
+  const recalledMessages = queryEmbedding
+    ? await recallRelatedMessages(supabase, queryEmbedding, conversationId, CONVERSATION_RECALL_LIMIT)
+    : []
 
   // The model needs "now" to resolve relative times ("in 10 minutes",
   // "tomorrow at 5pm") into the absolute ISO timestamp create_reminder needs.
@@ -342,6 +374,27 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   if (relevantChunks.length > 0) {
     systemPrompt += `\n\nRelevant excerpts from the user's uploaded documents (cite naturally, don't fabricate beyond what's here):\n${relevantChunks.map((c) => `- ${c.content}`).join('\n\n')}`
+  }
+
+  if (recalledMessages.length > 0) {
+    // Dated and attributed so the model can say "you mentioned last
+    // Tuesday..." naturally, and so it can tell its own past words apart
+    // from the user's. Explicitly framed as possibly-stale: an old
+    // conversation is evidence of what was said then, not necessarily
+    // what's true now, and the model shouldn't assert it as current fact.
+    const recallBlock = recalledMessages
+      .map((m) => {
+        const when = new Date(m.created_at).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric'
+        })
+        const speaker = m.role === 'user' ? 'User said' : 'You said'
+        return `- [${when}, in "${m.conversation_title}"] ${speaker}: ${m.content.slice(0, 600)}`
+      })
+      .join('\n')
+
+    systemPrompt += `\n\nRelevant excerpts from the user's OTHER past conversations with you. Use these to stay consistent and to answer questions about what was discussed before. They may be outdated — treat them as a record of what was said at that time, not as guaranteed-current fact, and reference when it was said if it matters:\n${recallBlock}`
   }
 
   if (userDocuments.length > 0) {
@@ -443,7 +496,8 @@ export async function POST(request: NextRequest): Promise<Response> {
                       result: await executeToolCall(
                         { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
                         supabase,
-                        user.id
+                        user.id,
+                        { conversationId }
                       )
                     }
                   }
@@ -550,7 +604,8 @@ export async function POST(request: NextRequest): Promise<Response> {
                   content: await executeToolCall(
                     { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
                     supabase,
-                    user.id
+                    user.id,
+                    { conversationId }
                   )
                 }))
               )
@@ -588,7 +643,8 @@ export async function POST(request: NextRequest): Promise<Response> {
                   content: await executeToolCall(
                     { name: toolCall.name, argumentsJson: toolCall.argumentsJson },
                     supabase,
-                    user.id
+                    user.id,
+                    { conversationId }
                   )
                 }))
               )
@@ -631,13 +687,15 @@ export async function POST(request: NextRequest): Promise<Response> {
       // common transient case; if it still fails, the client is told
       // explicitly rather than silently losing the turn.
       if (fullContent) {
+        let insertedAssistantMessageId: string | null = null
         const persistReply = async (): Promise<void> => {
-          await insertMessage(supabase, {
+          const inserted = await insertMessage(supabase, {
             conversationId,
             userId: user.id,
             role: 'assistant',
             content: fullContent
           })
+          insertedAssistantMessageId = inserted.id
           await touchConversation(supabase, conversationId)
         }
 
@@ -680,6 +738,23 @@ export async function POST(request: NextRequest): Promise<Response> {
           // saving check shouldn't add latency to the stream, but it still
           // needs to actually complete.
           after(() => autoExtractMemory(user.id, effectiveContent, fullContent, supabase))
+
+          // Embeds this turn so it's findable from future conversations
+          // (see lib/db/message-embeddings.ts). after() rather than
+          // awaited: this costs an embedding round-trip and the reply has
+          // already streamed, so it must not add latency — but it does
+          // need to actually finish, which a bare `void` wouldn't
+          // guarantee on Vercel.
+          const turnMessages = [
+            insertedUserMessageId ? { id: insertedUserMessageId, content: effectiveContent } : null,
+            insertedAssistantMessageId
+              ? { id: insertedAssistantMessageId, content: fullContent }
+              : null
+          ].filter((m): m is { id: string; content: string } => m !== null)
+
+          if (turnMessages.length > 0) {
+            after(() => embedMessages(supabase, turnMessages))
+          }
         } catch (persistError) {
           console.error('Failed to persist assistant reply after retry:', persistError)
           controller.enqueue(

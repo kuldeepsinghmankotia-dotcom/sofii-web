@@ -127,6 +127,7 @@ export type Database = {
         Row: {
           chunk_index: number
           content: string
+          content_tsv: unknown
           created_at: string
           document_id: string
           embedding: string | null
@@ -138,6 +139,7 @@ export type Database = {
         Insert: {
           chunk_index: number
           content: string
+          content_tsv?: unknown
           created_at?: string
           document_id: string
           embedding?: string | null
@@ -149,6 +151,7 @@ export type Database = {
         Update: {
           chunk_index?: number
           content?: string
+          content_tsv?: unknown
           created_at?: string
           document_id?: string
           embedding?: string | null
@@ -285,6 +288,7 @@ export type Database = {
           content: string
           conversation_id: string
           created_at: string
+          embedding: string | null
           id: string
           image_url: string | null
           role: string
@@ -294,6 +298,7 @@ export type Database = {
           content: string
           conversation_id: string
           created_at?: string
+          embedding?: string | null
           id?: string
           image_url?: string | null
           role: string
@@ -303,6 +308,7 @@ export type Database = {
           content?: string
           conversation_id?: string
           created_at?: string
+          embedding?: string | null
           id?: string
           image_url?: string | null
           role?: string
@@ -448,6 +454,7 @@ export type Database = {
           match_count?: number
           modality_filter?: string
           query_embedding: string
+          query_text?: string
         }
         Returns: {
           content: string
@@ -461,12 +468,30 @@ export type Database = {
           match_count?: number
           modality_filter?: string
           query_embedding: string
+          query_text?: string
           target_user_id: string
         }
         Returns: {
           content: string
           document_id: string
           id: string
+          similarity: number
+        }[]
+      }
+      match_messages: {
+        Args: {
+          exclude_conversation_id: string
+          match_count?: number
+          query_embedding: string
+          similarity_threshold?: number
+        }
+        Returns: {
+          content: string
+          conversation_id: string
+          conversation_title: string
+          created_at: string
+          id: string
+          role: string
           similarity: number
         }[]
       }

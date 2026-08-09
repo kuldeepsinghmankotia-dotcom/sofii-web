@@ -273,7 +273,7 @@ export default function Sidebar({
           <button
             onClick={handleNewChat}
             disabled={creating}
-            className="relative flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-strong)] px-3 py-2.5 text-sm font-medium text-[var(--text)] transition hover:border-[var(--accent-a)] hover:shadow-[0_0_20px_rgba(34,211,238,0.15)] disabled:opacity-60"
+            className="relative flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-strong)] px-3 py-2.5 text-sm font-medium text-[var(--text)] transition hover:border-[var(--accent-a)] hover:shadow-[var(--shadow-glow-a)] disabled:opacity-60"
           >
             <Plus size={16} className="accent-icon" aria-hidden="true" />
             {creating ? 'Creating…' : 'New chat'}

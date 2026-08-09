@@ -126,6 +126,25 @@ export const TOOL_DEFINITIONS: ChatCompletionFunctionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'recall_past_conversations',
+      description:
+        "Search the user's earlier conversations with you for what was previously said about a topic. Use this whenever the user refers to something from the past that isn't in the current conversation — \"what did we decide about X\", \"the thing I mentioned last week\", \"remind me what you suggested\" — instead of guessing or saying you have no memory. Relevant excerpts from other conversations may already be provided in your context; only call this when you need to search for something more specific than what's already there.",
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description:
+              'What to search for, as a descriptive phrase about the topic (e.g. "the Bentley watch price comparison", "which laptop to buy"). This is a semantic search, so describe the subject rather than using keywords alone.'
+          }
+        },
+        required: ['query']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'summarize_document',
       description:
         'Summarize one of the user\'s uploaded documents in full. Use this when the user asks for a summary of a specific document, rather than answering from a short excerpt. Pick document_id from the "Available documents" list given in the system prompt — match by filename; if it\'s ambiguous which document they mean, ask instead of guessing.',

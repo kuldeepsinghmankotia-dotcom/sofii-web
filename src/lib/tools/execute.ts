@@ -5,6 +5,7 @@ import { createReminder, listPendingReminders } from '@/lib/db/reminders'
 import { getWeather } from '@/lib/weather/weather'
 import { searchWeb } from '@/lib/search/tavily'
 import { createCalendarEvent, getValidAccessToken, listUpcomingEvents } from '@/lib/google/calendar'
+import { recallRelatedMessagesByText } from '@/lib/db/message-embeddings'
 
 const CALENDAR_NOT_CONNECTED =
   'Google Calendar is not connected. Tell the user to connect it on the Calendar page.'
@@ -74,7 +75,12 @@ export interface ToolCallRequest {
 export async function executeToolCall(
   request: ToolCallRequest,
   supabase: Client,
-  userId: string
+  userId: string,
+  // Which conversation this call is happening in — used by
+  // recall_past_conversations to exclude the current thread from its own
+  // search results (its history is already fully in context). Optional so
+  // non-chat callers don't have to invent one.
+  context?: { conversationId?: string }
 ): Promise<string> {
   let args: Record<string, unknown>
 
@@ -222,6 +228,39 @@ export async function executeToolCall(
         documentIds: [documentId],
         intent: 'extract_structured_data'
       })
+    }
+
+    case 'recall_past_conversations': {
+      const query = typeof args.query === 'string' ? args.query.trim() : ''
+      if (!query) return 'Error: query is required.'
+
+      const results = await recallRelatedMessagesByText(
+        supabase,
+        query,
+        // Empty-string sentinel rather than skipping the filter: the RPC
+        // compares with IS DISTINCT FROM, so a null would match nothing to
+        // exclude, which is exactly the right behavior when there's no
+        // current conversation to exclude. A non-uuid string would error,
+        // so fall back to a nil UUID (never a real conversation id).
+        context?.conversationId ?? '00000000-0000-0000-0000-000000000000',
+        5
+      )
+
+      if (results.length === 0) {
+        return 'No relevant past conversations found. Tell the user you could not find anything about that in your earlier conversations, rather than guessing.'
+      }
+
+      return results
+        .map((m) => {
+          const when = new Date(m.created_at).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+          })
+          const speaker = m.role === 'user' ? 'User' : 'You'
+          return `[${when}, conversation "${m.conversation_title}"] ${speaker}: ${m.content.slice(0, 800)}`
+        })
+        .join('\n\n')
     }
 
     default:
