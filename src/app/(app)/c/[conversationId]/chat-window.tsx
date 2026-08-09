@@ -40,6 +40,7 @@ import { createClient } from '@/lib/supabase/client'
 import { resizeImageToJpeg } from '@/lib/image/resize'
 import { downloadConversationAsMarkdown } from '@/lib/export/markdown'
 import {
+  detectScriptLanguage,
   detectSpeechLanguage,
   keepSpeechAlive,
   loadVoices,
@@ -223,6 +224,14 @@ export default function ChatWindow({
   const abortControllerRef = useRef<AbortController | null>(null)
   const prefillSentRef = useRef(false)
   const activeRecordingIsHandsFreeRef = useRef(false)
+  // Set only once a transcription in this conversation has come back with
+  // confident, unambiguous script evidence (e.g. Devanagari) — see
+  // detectScriptLanguage's own comment on why this never starts as a
+  // guess. Once set, every later recording in this conversation passes it
+  // to Whisper as a hint, which is what actually stops the language from
+  // flip-flopping turn to turn (the reported Hindi-transcribed-as-Chinese
+  // bug) instead of re-guessing from scratch on every single utterance.
+  const speechLangHintRef = useRef<string | null>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -714,7 +723,9 @@ export default function ChatWindow({
 
         setIsTranscribing(true)
         try {
-          const response = await fetch('/api/voice/transcribe', {
+          const hint = speechLangHintRef.current
+          const url = hint ? `/api/voice/transcribe?language=${hint}` : '/api/voice/transcribe'
+          const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'audio/webm' },
             body: blob
@@ -723,6 +734,14 @@ export default function ChatWindow({
           if (!response.ok) throw new Error(await response.text())
 
           const { text } = (await response.json()) as { text: string }
+          // Locks in a hint for every later recording in this conversation
+          // once real script evidence shows up — see speechLangHintRef's
+          // own comment. Never downgraded back to null by Latin-script
+          // text afterward: a confirmed non-English speaker occasionally
+          // saying an English word/name shouldn't reset the hint.
+          const detectedScript = detectScriptLanguage(text)
+          if (detectedScript) speechLangHintRef.current = detectedScript.split('-')[0]
+
           if (text.trim()) {
             // sendMessage clears voiceTurnActive itself once the whole
             // reply (including speaking it) is done. fromHandsFree tells

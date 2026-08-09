@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { detectSpeechLanguage, keepSpeechAlive, pickBestVoice } from './select-voice'
+import { detectScriptLanguage, detectSpeechLanguage, keepSpeechAlive, pickBestVoice } from './select-voice'
 
 function voice(overrides: Partial<SpeechSynthesisVoice>): SpeechSynthesisVoice {
   return {
@@ -48,6 +48,24 @@ describe('detectSpeechLanguage', () => {
   })
 })
 
+describe('detectScriptLanguage', () => {
+  it('detects Devanagari (Hindi) script confidently', () => {
+    expect(detectScriptLanguage('नमस्ते, आप कैसे हैं?')).toBe('hi-IN')
+  })
+
+  it('returns null for Latin-script text rather than guessing', () => {
+    expect(detectScriptLanguage('Hello, how are you?')).toBeNull()
+  })
+
+  it('never confuses Hindi (Devanagari) with Chinese', () => {
+    // The actual reported bug: spoken Hindi ended up hinted/voiced as
+    // Chinese. Devanagari and CJK Unified Ideographs are disjoint Unicode
+    // blocks, so this should never happen from this function's own logic -
+    // guards against a future SCRIPT_RANGES edit reintroducing overlap.
+    expect(detectScriptLanguage('नमस्ते')).not.toBe('zh-CN')
+  })
+})
+
 describe('pickBestVoice', () => {
   it('returns null for an empty voice list', () => {
     expect(pickBestVoice([], 'en-US')).toBeNull()
@@ -75,10 +93,15 @@ describe('pickBestVoice', () => {
     expect(pickBestVoice([plain, enhanced], 'en-US')).toBe(enhanced)
   })
 
-  it('prefers a network-backed voice over a local one, all else equal', () => {
+  it('prefers a local (low-latency) voice over a network-backed one, all else equal', () => {
     const local = voice({ name: 'Local Voice', lang: 'en-US', localService: true })
     const network = voice({ name: 'Network Voice', lang: 'en-US', localService: false })
-    expect(pickBestVoice([local, network], 'en-US')).toBe(network)
+    expect(pickBestVoice([local, network], 'en-US')).toBe(local)
+  })
+
+  it('still picks a network voice over no voice at all when nothing local matches', () => {
+    const network = voice({ name: 'Network Voice', lang: 'hi-IN', localService: false })
+    expect(pickBestVoice([network], 'hi-IN')).toBe(network)
   })
 
   it('prefers a curated warm-sounding voice over a plain default voice', () => {
@@ -88,10 +111,16 @@ describe('pickBestVoice', () => {
   })
 
   it('respects curated-list order between two curated voices', () => {
-    // 'ava' is listed before 'google us english' in CURATED_VOICE_NAMES.
-    const google = voice({ name: 'Google US English', lang: 'en-US' })
+    // 'ava' is listed before 'samantha' in CURATED_VOICE_NAMES.
+    const samantha = voice({ name: 'Samantha', lang: 'en-US' })
     const ava = voice({ name: 'Ava', lang: 'en-US' })
-    expect(pickBestVoice([google, ava], 'en-US')).toBe(ava)
+    expect(pickBestVoice([samantha, ava], 'en-US')).toBe(ava)
+  })
+
+  it('prefers a curated local voice over an uncurated network voice', () => {
+    const network = voice({ name: 'Google US English', lang: 'en-US', localService: false })
+    const curatedLocal = voice({ name: 'Samantha', lang: 'en-US', localService: true })
+    expect(pickBestVoice([network, curatedLocal], 'en-US')).toBe(curatedLocal)
   })
 })
 

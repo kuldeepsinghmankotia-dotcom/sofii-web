@@ -34,11 +34,25 @@ const SCRIPT_RANGES: { lang: string; pattern: RegExp }[] = [
   { lang: 'el-GR', pattern: /[Ͱ-Ͽ]/ }
 ]
 
-export function detectSpeechLanguage(text: string): string {
+// Script evidence only, no locale fallback — returns null rather than
+// guessing when text is Latin-script (ambiguous: could be English, French,
+// Spanish, ...). Used to build a *confident* per-conversation language
+// hint for speech-to-text (see chat-window.tsx's speechLangHintRef); a
+// fallback guess would be actively worse there, since a wrong hint passed
+// to Whisper actively degrades transcription instead of just picking a
+// mediocre voice.
+export function detectScriptLanguage(text: string): string | null {
   for (const { lang, pattern } of SCRIPT_RANGES) {
     if (pattern.test(text)) return lang
   }
-  return typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-US'
+  return null
+}
+
+export function detectSpeechLanguage(text: string): string {
+  return (
+    detectScriptLanguage(text) ??
+    (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-US')
+  )
 }
 
 // Chrome in particular returns an empty voice list on the very first call —
@@ -66,26 +80,22 @@ export function loadVoices(): Promise<SpeechSynthesisVoice[]> {
   })
 }
 
-const PREFERRED_NAME_HINTS = ['natural', 'enhanced', 'premium', 'neural', 'google']
+const PREFERRED_NAME_HINTS = ['natural', 'enhanced', 'premium', 'neural']
 
 // Specific voices known to read as warm/pleasant rather than flat or
 // robotic, checked ahead of the generic hints above — this is what
 // actually changes which voice gets picked among several that all
-// technically match the target language (e.g. preferring "Google UK
-// English Female" or "Samantha" over "Google US English" or an OS's
-// arbitrary picked-by-nothing default like "Rishi"/"Albert"). Ordered by
-// preference; first match in the list wins over a later one.
-const CURATED_VOICE_NAMES = [
-  'ava',
-  'samantha',
-  'zoe',
-  'serena',
-  'aria',
-  'jenny',
-  'google uk english female',
-  'google us english',
-  'nicky'
-]
+// technically match the target language (e.g. preferring "Samantha" over
+// an OS's arbitrary picked-by-nothing default like "Rishi"/"Albert").
+// Ordered by preference; first match in the list wins over a later one.
+// Deliberately local/on-device voices only (Apple/Microsoft system
+// voices) — a "Google ..." network voice used to sit at the top of this
+// list, which meant it got picked over an equally fine on-device voice
+// purely for being named "Google", adding real network round-trip latency
+// (send text to Google's TTS servers, stream audio back) before speech
+// could even start. That's real, reported lag, not a quality trade worth
+// making by default — see the localService scoring below.
+const CURATED_VOICE_NAMES = ['ava', 'samantha', 'zoe', 'serena', 'aria', 'jenny', 'nicky']
 
 function baseLang(tag: string): string {
   return tag.split('-')[0].toLowerCase()
@@ -126,9 +136,14 @@ export function pickBestVoice(
 
     score += curatedRank(voice.name)
     if (PREFERRED_NAME_HINTS.some((hint) => voice.name.toLowerCase().includes(hint))) score += 20
-    // Network-backed voices are usually the higher-quality ones (vs. the
-    // always-available compact/offline voice) where a browser offers both.
-    if (!voice.localService) score += 10
+    // On-device voices start speaking immediately; a network-backed voice
+    // (Chrome's "Google ..." voices in particular) has to round-trip text
+    // to a remote TTS server and stream audio back before anything plays —
+    // real, noticeable latency, reported as "lag" for exactly the
+    // languages that often only have a network voice installed at all.
+    // Prefer local when there's a genuine choice; a network voice still
+    // wins over no voice in that language whatsoever.
+    if (voice.localService) score += 15
     if (voice.default) score += 5
 
     if (score > bestScore) {

@@ -30,11 +30,23 @@ export async function POST(request: NextRequest): Promise<Response> {
     return new Response('Empty audio', { status: 400 })
   }
 
+  // Optional ISO-639-1 hint (e.g. "hi"), passed via query string since the
+  // request body here is the raw audio, not JSON. Whisper's own
+  // auto-detection is noticeably less reliable on short clips — this is
+  // what let real spoken Hindi come back mis-detected as Chinese. The
+  // caller (chat-window.tsx) only ever sends this once it has *confident*
+  // script-based evidence from an earlier transcription in the same
+  // conversation, not a guess, since a wrong hint here actively degrades
+  // accuracy rather than just picking a mediocre voice would.
+  const languageParam = request.nextUrl.searchParams.get('language')
+  const language = languageParam && /^[a-z]{2}$/.test(languageParam) ? languageParam : undefined
+
   try {
     const file = await toFile(arrayBuffer, 'audio.webm', { type: mimeType })
     const transcription = await getGroqClient().audio.transcriptions.create({
       file,
-      model: TRANSCRIPTION_MODEL
+      model: TRANSCRIPTION_MODEL,
+      ...(language ? { language } : {})
     })
 
     return Response.json({ text: transcription.text })
