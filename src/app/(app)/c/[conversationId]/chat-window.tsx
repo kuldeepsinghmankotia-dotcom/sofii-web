@@ -48,6 +48,7 @@ import {
   SPEECH_PITCH,
   SPEECH_RATE
 } from '@/lib/voice/select-voice'
+import { fetchCloudSpeech, supportsCloudVoice } from '@/lib/voice/cloud-tts'
 import VoiceOrb from './voice-orb'
 import { CopyButton, ShareButton, AssistantContent } from './message-content'
 import { notifyConversationsChanged } from '../../sidebar'
@@ -232,8 +233,22 @@ export default function ChatWindow({
   // flip-flopping turn to turn (the reported Hindi-transcribed-as-Chinese
   // bug) instead of re-guessing from scratch on every single utterance.
   const speechLangHintRef = useRef<string | null>(null)
+  // The currently-playing cloud-TTS <audio> element, if any — tracked
+  // separately from the browser voice path (which has its own built-in
+  // "one utterance at a time" queue via speechSynthesis) since a plain
+  // Audio element has no equivalent; stopAnySpeech() below is the single
+  // place that knows how to interrupt whichever path is currently talking.
+  const cloudAudioRef = useRef<HTMLAudioElement | null>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
+
+  const stopAnySpeech = (): void => {
+    window.speechSynthesis.cancel()
+    if (cloudAudioRef.current) {
+      cloudAudioRef.current.pause()
+      cloudAudioRef.current = null
+    }
+  }
 
   useEffect(() => {
     // Warms the browser's voice list on mount rather than waiting for the
@@ -243,7 +258,7 @@ export default function ChatWindow({
     // the very first reply after a user turns spoken replies on.
     void loadVoices()
     return () => {
-      window.speechSynthesis.cancel()
+      stopAnySpeech()
     }
   }, [])
 
@@ -313,16 +328,48 @@ export default function ChatWindow({
       onEnd?.()
       return
     }
-    window.speechSynthesis.cancel()
+    stopAnySpeech()
 
     void (async () => {
+      const lang = detectSpeechLanguage(text)
+
+      // Cloud TTS (Groq-hosted Orpheus) first, for the languages it
+      // covers — genuinely natural neural voice quality, not just "the
+      // best of the browser's built-in options". Falls through to the
+      // browser voice on any failure (network error, the Groq-side terms
+      // gate not cleared yet, rate limiting) rather than ever being a dead
+      // end for spoken replies.
+      if (supportsCloudVoice(lang)) {
+        const audioBlob = await fetchCloudSpeech(text)
+        if (audioBlob) {
+          const url = URL.createObjectURL(audioBlob)
+          const audio = new Audio(url)
+          cloudAudioRef.current = audio
+          setIsSpeaking(true)
+          const finish = (): void => {
+            URL.revokeObjectURL(url)
+            if (cloudAudioRef.current === audio) cloudAudioRef.current = null
+            setIsSpeaking(false)
+            onEnd?.()
+          }
+          audio.onended = finish
+          audio.onerror = finish
+          try {
+            await audio.play()
+            return
+          } catch {
+            finish()
+            // falls through to the browser voice below
+          }
+        }
+      }
+
       const utterance = new SpeechSynthesisUtterance(text)
       // Matches the utterance to an actual installed voice for whatever
       // language it's speaking, instead of the browser's single unnamed
       // default (previously never set at all — every reply, in every
       // language, played through whichever voice the OS happened to
       // default to, which is also often its lowest-quality one).
-      const lang = detectSpeechLanguage(text)
       const voices = await loadVoices()
       const voice = pickBestVoice(voices, lang)
       utterance.lang = voice?.lang ?? lang
@@ -1000,7 +1047,7 @@ export default function ChatWindow({
             whileTap={reducedMotion ? undefined : { scale: 0.9 }}
             onClick={() =>
               setSpeakEnabled((prev) => {
-                if (prev) window.speechSynthesis.cancel()
+                if (prev) stopAnySpeech()
                 return !prev
               })
             }

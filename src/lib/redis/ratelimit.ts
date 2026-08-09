@@ -10,6 +10,7 @@ import { getRedis } from './client'
 let chatLimiter: Ratelimit | null = null
 let queryLimiter: Ratelimit | null = null
 let ingestLimiter: Ratelimit | null = null
+let speakLimiter: Ratelimit | null = null
 
 export function getChatRatelimit(): Ratelimit {
   if (!chatLimiter) {
@@ -44,4 +45,18 @@ export function getIngestRatelimit(): Ratelimit {
     })
   }
   return ingestLimiter
+}
+
+// Cloud TTS (Groq-hosted Orpheus) synthesizes real audio per call — a
+// materially heavier operation than a chat completion, so its own budget
+// rather than sharing the chat limiter.
+export function getSpeakRatelimit(): Ratelimit {
+  if (!speakLimiter) {
+    speakLimiter = new Ratelimit({
+      redis: getRedis(),
+      limiter: Ratelimit.slidingWindow(20, '10 m'),
+      prefix: 'ratelimit:speak'
+    })
+  }
+  return speakLimiter
 }
