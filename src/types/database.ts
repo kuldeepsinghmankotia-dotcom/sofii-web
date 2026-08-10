@@ -39,6 +39,97 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_steps: {
+        Row: {
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          result: string | null
+          started_at: string | null
+          status: string
+          step_index: number
+          task_id: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          result?: string | null
+          started_at?: string | null
+          status?: string
+          step_index: number
+          task_id: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          result?: string | null
+          started_at?: string | null
+          status?: string
+          step_index?: number
+          task_id?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_steps_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "agent_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_tasks: {
+        Row: {
+          conversation_id: string | null
+          created_at: string
+          error_message: string | null
+          goal: string
+          id: string
+          status: string
+          summary: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          conversation_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          goal: string
+          id?: string
+          status?: string
+          summary?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          conversation_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          goal?: string
+          id?: string
+          status?: string
+          summary?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_tasks_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       briefings: {
         Row: {
           created_at: string

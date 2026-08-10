@@ -11,6 +11,7 @@ import {
   Calendar,
   FileText,
   Inbox,
+  ListChecks,
   MoreHorizontal,
   Pencil,
   MessageCircle,
@@ -56,6 +57,7 @@ const SECONDARY_LINKS = [
   { href: '/reminders', label: 'Reminders', icon: Bell },
   { href: '/documents', label: 'Documents', icon: FileText },
   { href: '/calendar', label: 'Calendar', icon: Calendar },
+  { href: '/tasks', label: 'Tasks', icon: ListChecks },
   { href: '/whatsapp', label: 'WhatsApp', icon: MessageCircle }
 ]
 
