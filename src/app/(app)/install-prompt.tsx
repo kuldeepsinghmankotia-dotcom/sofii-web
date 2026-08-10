@@ -138,7 +138,12 @@ export default function InstallPrompt() {
             className="h-6 w-6 shrink-0 rounded-full"
             style={{ background: 'var(--accent-gradient)', boxShadow: 'var(--avatar-glow-sm)' }}
           />
-          <p className="font-display accent-text text-sm tracking-wide">Add Sofii to your home screen</p>
+          <p className="font-display accent-text text-sm tracking-wide">
+            {/* "Home screen" is iOS's own wording for the gesture being
+                described. Chrome fires beforeinstallprompt on desktop too,
+                where that phrasing makes no sense. */}
+            {platform === 'ios' ? 'Add Sofii to your home screen' : 'Install Sofii'}
+          </p>
         </div>
 
         {platform === 'ios' ? (
@@ -160,7 +165,7 @@ export default function InstallPrompt() {
         ) : (
           <>
             <p className="mb-3 text-sm leading-relaxed text-[var(--text-muted)]">
-              Opens like an app, works offline, and lets me send you reminders.
+              Opens in its own window, and lets me send you reminders.
             </p>
             <button
               onClick={() => void install()}

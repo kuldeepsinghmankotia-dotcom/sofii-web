@@ -13,6 +13,7 @@ import {
   Inbox,
   MoreHorizontal,
   Pencil,
+  MessageCircle,
   MessageSquarePlus,
   Plus,
   Search,
@@ -54,7 +55,8 @@ const SECONDARY_LINKS = [
   { href: '/memories', label: 'Memories', icon: Sparkles },
   { href: '/reminders', label: 'Reminders', icon: Bell },
   { href: '/documents', label: 'Documents', icon: FileText },
-  { href: '/calendar', label: 'Calendar', icon: Calendar }
+  { href: '/calendar', label: 'Calendar', icon: Calendar },
+  { href: '/whatsapp', label: 'WhatsApp', icon: MessageCircle }
 ]
 
 const ADMIN_LINKS = [
