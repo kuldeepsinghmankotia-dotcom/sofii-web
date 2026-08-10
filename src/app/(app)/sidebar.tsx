@@ -10,6 +10,7 @@ import {
   Bell,
   Calendar,
   FileText,
+  Inbox,
   MoreHorizontal,
   Pencil,
   MessageSquarePlus,
@@ -55,7 +56,10 @@ const SECONDARY_LINKS = [
   { href: '/calendar', label: 'Calendar', icon: Calendar }
 ]
 
-const ADMIN_LINK = { href: '/admin/system-prompt', label: 'System Prompt', icon: ShieldCheck }
+const ADMIN_LINKS = [
+  { href: '/admin/system-prompt', label: 'System Prompt', icon: ShieldCheck },
+  { href: '/admin/feedback', label: 'Feedback inbox', icon: Inbox }
+]
 
 type Group = { label: string; items: ConversationSummary[] }
 
@@ -385,7 +389,7 @@ export default function Sidebar({
         </nav>
 
         <div className="shrink-0 border-t border-[var(--border)] px-2 py-2">
-          {(isAdmin ? [...SECONDARY_LINKS, ADMIN_LINK] : SECONDARY_LINKS).map((link) => (
+          {(isAdmin ? [...SECONDARY_LINKS, ...ADMIN_LINKS] : SECONDARY_LINKS).map((link) => (
             <Link
               key={link.href}
               href={link.href}

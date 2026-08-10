@@ -54,6 +54,14 @@ export default function SignInPage() {
           className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3 text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
         />
 
+        {/* Sits directly under the password field, where someone who just
+            failed to remember it is already looking. */}
+        <div className="flex justify-end">
+          <Link href="/forgot-password" className="text-sm text-[var(--text-muted)] hover:text-[var(--accent-a)]">
+            Forgot password?
+          </Link>
+        </div>
+
         {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
 
         <button

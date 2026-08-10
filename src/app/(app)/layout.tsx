@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { listConversations } from '@/lib/db/conversations'
 import { getOwnRole } from '@/lib/db/profiles'
 import AppShell from './app-shell'
+import Onboarding from './onboarding'
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const supabase = await createClient()
@@ -20,10 +21,16 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     redirect('/landing')
   }
 
-  const [conversations, role] = await Promise.all([
+  const [conversations, role, profile] = await Promise.all([
     listConversations(supabase),
-    getOwnRole(supabase, user.id)
+    getOwnRole(supabase, user.id),
+    supabase.from('profiles').select('onboarded_at').eq('id', user.id).maybeSingle()
   ])
+
+  // Shown once per account. Rendered here rather than on the home page so
+  // it appears no matter which route a new user lands on first (a shared
+  // link, a bookmarked /documents, etc.).
+  const needsOnboarding = !profile.data?.onboarded_at
 
   return (
     <AppShell
@@ -31,6 +38,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       userEmail={user.email ?? ''}
       isAdmin={role === 'admin'}
     >
+      {needsOnboarding && <Onboarding />}
       {children}
     </AppShell>
   )
