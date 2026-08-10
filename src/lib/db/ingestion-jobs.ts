@@ -50,9 +50,25 @@ const DOCUMENT_UPLOADS_BUCKET = 'document-uploads'
 async function deleteStorageObject(supabase: Client, storagePath: string | null): Promise<void> {
   if (!storagePath) return
   try {
-    await supabase.storage.from(DOCUMENT_UPLOADS_BUCKET).remove([storagePath])
+    // remove() reports failure by *returning* an error, it does not throw —
+    // so a try/catch alone silently discards every failure. That is exactly
+    // how this cleanup came to be a no-op while looking correct: files kept
+    // piling up in the bucket with nothing logged anywhere.
+    const { data, error } = await supabase.storage.from(DOCUMENT_UPLOADS_BUCKET).remove([storagePath])
+
+    if (error) {
+      console.error('Failed to delete orphaned Storage object:', storagePath, error.message)
+      return
+    }
+
+    // An empty data array means remove() matched nothing — the usual cause
+    // is RLS filtering the row out, which is *not* reported as an error.
+    // Silence here would be indistinguishable from success.
+    if (!data || data.length === 0) {
+      console.error('Orphaned Storage object not removed (no matching object):', storagePath)
+    }
   } catch (error) {
-    console.error('Failed to delete orphaned Storage object:', error)
+    console.error('Failed to delete orphaned Storage object:', storagePath, error)
   }
 }
 

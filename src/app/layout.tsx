@@ -79,9 +79,18 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
       className={`${geistSans.variable} ${geistMono.variable} ${orbitron.variable} h-full antialiased`}
     >
       <head>
-        {/* Must be raw HTML in <head>, not next/script: it has to execute
-        before the first paint, and anything deferred to hydration is by
-        definition too late to prevent a flash. */}
+        {/* Must be raw HTML inside an explicit <head>, not next/script and
+        not an unwrapped <script>: it has to execute before the first paint,
+        and anything deferred to hydration is by definition too late to
+        prevent a flash.
+
+        The explicit <head> is load-bearing — dropping it to let React hoist
+        the tag instead was measured, and React emitted the script *inside*
+        <body> after the content div, i.e. after first paint. React's
+        dev-only "script tags never execute when rendering on the client"
+        warning is the accepted cost of this; it does not fire in a
+        production build (verified), and a dev console warning is a far
+        cheaper problem than a theme flash on every real page load. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="flex min-h-full flex-col">

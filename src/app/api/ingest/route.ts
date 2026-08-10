@@ -53,7 +53,14 @@ async function startIngestionJob(
   const serviceSecret = process.env.INGEST_SERVICE_SECRET
 
   if (!serviceUrl || !serviceSecret) {
-    return new Response('Ingestion service is not configured', { status: 503 })
+    // Same reasoning as the unreachable case below: a missing env var is
+    // our problem to fix, not something to narrate to the person who just
+    // wanted to upload a file.
+    console.error('Ingestion attempted with INGEST_SERVICE_URL/SECRET unset')
+    return new Response(
+      'Uploads of this file type are temporarily unavailable — nothing was lost, please try again in a few minutes. (PDFs are unaffected.)',
+      { status: 503 }
+    )
   }
 
   const storagePath = `${user.id}/${randomUUID()}-${params.filename}`
@@ -66,7 +73,23 @@ async function startIngestionJob(
     return new Response(`Failed to upload file: ${uploadError.message}`, { status: 500 })
   }
 
-  const job = await createIngestionJob(supabase, { userId: user.id, filename: params.filename, storagePath })
+  // The file is already in Storage by this point, but nothing yet points at
+  // it: the job row is what records where it went. If this insert fails the
+  // upload is unreachable and unattributable — no row, no cleanup, orphaned
+  // forever. (Observed for real: a missing column made this throw, and the
+  // file was still sitting in the bucket afterwards.) Every failure between
+  // the upload and a committed job row has to undo the upload itself.
+  let job
+  try {
+    job = await createIngestionJob(supabase, { userId: user.id, filename: params.filename, storagePath })
+  } catch (error) {
+    await supabase.storage.from(DOCUMENT_UPLOADS_BUCKET).remove([storagePath])
+    console.error('Failed to create ingestion job, removed orphaned upload:', storagePath, error)
+    return new Response(
+      'Uploads of this file type are temporarily unavailable — nothing was lost, please try again in a few minutes. (PDFs are unaffected.)',
+      { status: 503 }
+    )
+  }
 
   try {
     const upstream = await fetch(`${serviceUrl}/ingest`, {
@@ -78,7 +101,14 @@ async function startIngestionJob(
         storage_path: storagePath,
         filename: params.filename,
         mime_type: params.mimeType
-      })
+      }),
+      // This handoff only enqueues work — the service replies as soon as it
+      // has accepted the job, so anything slower than this is a sick
+      // upstream, not a big file. Without a timeout a machine that is
+      // asleep-but-still-tunnelled accepts the TCP connection and then
+      // never answers, leaving the user watching a spinner until the
+      // platform's 300s function timeout kills it.
+      signal: AbortSignal.timeout(15_000)
     })
 
     if (!upstream.ok) {
@@ -89,8 +119,19 @@ async function startIngestionJob(
     // The file was already uploaded above but the job never made it to the
     // Python service, so nothing will ever process (or clean up) it —
     // delete it now rather than leaving it orphaned in Storage forever.
+    // The internal detail goes to the job row (visible to us in the DB),
+    // never to the user.
     await markIngestionJobFailed(supabase, job.id, `Ingestion service unreachable: ${message}`, storagePath)
-    return new Response('Ingestion service unreachable', { status: 502 })
+    console.error('Ingestion service unreachable:', message)
+    // Deliberately not "Ingestion service unreachable": that is our
+    // vocabulary, not the user's, and it reads as "this product is
+    // broken". This path means one optional backend is temporarily down —
+    // PDFs and everything else still work — so say that, and say what to
+    // do about it.
+    return new Response(
+      'Uploads of this file type are temporarily unavailable — nothing was lost, please try again in a few minutes. (PDFs are unaffected.)',
+      { status: 503 }
+    )
   }
 
   return Response.json({ jobId: job.id }, { status: 202 })
