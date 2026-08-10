@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -10,7 +10,22 @@ export default function SignInPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [linkFailed, setLinkFailed] = useState(false)
   const [loading, setLoading] = useState(false)
+
+  // /auth/callback bounces here when it can't exchange a code — most
+  // often an expired or already-used password-reset link. Without this the
+  // user landed on a plain sign-in form with no explanation of why their
+  // link didn't work, and no route to a fresh one.
+  //
+  // Read from window.location rather than useSearchParams to avoid
+  // requiring a Suspense boundary around this whole page just to read one
+  // optional param.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('error')) {
+      queueMicrotask(() => setLinkFailed(true))
+    }
+  }, [])
 
   const handleSubmit = async (e: FormEvent): Promise<void> => {
     e.preventDefault()
@@ -35,6 +50,16 @@ export default function SignInPage() {
     <main className="flex min-h-screen items-center justify-center bg-[var(--bg)] text-[var(--text)]">
       <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4 p-8">
         <h1 className="text-2xl font-bold">Sign in to Sofii</h1>
+
+        {linkFailed && (
+          <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-subtle)] p-3 text-sm leading-relaxed text-[var(--text-muted)]">
+            That link didn&apos;t work — reset links are single-use and expire after about an hour.{' '}
+            <Link href="/forgot-password" className="text-[var(--accent-a)] underline">
+              Request a new one
+            </Link>
+            .
+          </div>
+        )}
 
         <input
           type="email"
