@@ -51,6 +51,7 @@ import {
   stripEmojisForSpeech
 } from '@/lib/voice/select-voice'
 import { fetchCloudSpeech, supportsCloudVoice } from '@/lib/voice/cloud-tts'
+import { useHoldToTalk } from '@/lib/gestures/hold-to-talk'
 import VoiceOrb from './voice-orb'
 import { CopyButton, ShareButton, AssistantContent, BranchButton } from './message-content'
 import { ContextSourcesPanel } from './context-sources-panel'
@@ -982,6 +983,18 @@ export default function ChatWindow({
     setIsRecording(false)
   }
 
+  // Press-and-hold to record, release to send — the voice-note gesture
+  // people already use daily in WhatsApp, which is the reference point for
+  // most Indian users. Layered over the existing tap-to-toggle rather than
+  // replacing it: tap remains the only path that works with a keyboard, a
+  // mouse or assistive tech, and the only sane one for a long dictation.
+  const holdToTalk = useHoldToTalk({
+    onHoldStart: () => void startRecording(),
+    onHoldEnd: stopRecording,
+    onTap: () => toggleRecording(),
+    disabled: isTranscribing
+  })
+
   const toggleRecording = (): void => {
     if (isRecording) {
       stopRecording()
@@ -1528,13 +1541,20 @@ export default function ChatWindow({
       </AnimatePresence>
 
       <div className="accent-ring mx-auto mt-4 flex w-full max-w-3xl items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-subtle)] p-2">
-        <Tooltip label="Start recording">
+        <Tooltip label="Tap to record, or hold to talk">
           <motion.button
             whileTap={reducedMotion ? undefined : { scale: 0.9 }}
-            onClick={toggleRecording}
+            onPointerDown={holdToTalk.onPointerDown}
+            onPointerUp={holdToTalk.onPointerUp}
+            onPointerCancel={holdToTalk.onPointerCancel}
+            onClick={holdToTalk.onClick}
             disabled={isTranscribing}
-            aria-label="Start voice recording"
-            className="relative rounded-xl px-3 py-2.5 hover:bg-[var(--surface-hover-strong)] disabled:opacity-60"
+            aria-label="Start voice recording. Tap to toggle, or press and hold to talk."
+            // Without this, pressing and holding on mobile selects
+            // surrounding text and pops the system callout, which fights the
+            // gesture. touch-none stops the browser treating the press as
+            // the start of a scroll.
+            className="relative touch-none select-none rounded-xl px-3 py-2.5 hover:bg-[var(--surface-hover-strong)] disabled:opacity-60"
           >
             {isWakeListening && !reducedMotion && (
               <motion.span
