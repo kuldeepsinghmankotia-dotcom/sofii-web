@@ -1,4 +1,5 @@
 import { sarvamRequest } from './client'
+import { extensionForMimeType } from '@/lib/voice/recording-format'
 import { BULBUL_LANGS, toSarvamLanguageCode } from './languages'
 
 // ---------------------------------------------------------------------------
@@ -51,10 +52,10 @@ export async function transcribeWithSaaras(
 ): Promise<TranscriptionResult | null> {
   const form = new FormData()
 
-  // Extension matters less than the declared type, but Sarvam accepts webm
-  // and the browser's MediaRecorder produces it, so pass both through
-  // rather than transcoding.
-  form.append('file', new Blob([audio], { type: mimeType }), 'audio.webm')
+  // Filename extension has to match the real container: Safari records MP4
+  // where Chrome records WebM, and an .webm name on MP4 bytes makes the API
+  // route on the wrong decoder.
+  form.append('file', new Blob([audio], { type: mimeType }), `audio.${extensionForMimeType(mimeType)}`)
   form.append('model', SAARAS_MODEL)
   form.append('mode', SAARAS_MODE)
   form.append('language_code', toSarvamLanguageCode(languageHint) ?? AUTO_DETECT)

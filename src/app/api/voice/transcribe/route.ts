@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getGroqClient } from '@/lib/groq/client'
 import { isSarvamConfigured } from '@/lib/sarvam/client'
 import { transcribeWithSaaras } from '@/lib/sarvam/speech'
+import { extensionForMimeType } from '@/lib/voice/recording-format'
 
 // Groq's hosted Whisper endpoint, not a local model: keeps setup free (same
 // GROQ_API_KEY already used for chat) and avoids a local whisper.cpp/ffmpeg
@@ -71,7 +72,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   try {
-    const file = await toFile(arrayBuffer, 'audio.webm', { type: mimeType })
+    // Same reasoning as the Saaras path: the name must describe the real
+    // container, since Safari sends MP4 and Chrome sends WebM.
+    const file = await toFile(arrayBuffer, `audio.${extensionForMimeType(mimeType)}`, { type: mimeType })
     const transcription = await getGroqClient().audio.transcriptions.create({
       file,
       model: TRANSCRIPTION_MODEL,

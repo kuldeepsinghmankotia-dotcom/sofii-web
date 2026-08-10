@@ -52,6 +52,8 @@ import {
 } from '@/lib/voice/select-voice'
 import { fetchCloudSpeech, supportsCloudVoice } from '@/lib/voice/cloud-tts'
 import { useHoldToTalk } from '@/lib/gestures/hold-to-talk'
+import { baseMimeType, pickRecordingMimeType } from '@/lib/voice/recording-format'
+import { getPlaybackElement, installAudioUnlock } from '@/lib/voice/audio-playback'
 import VoiceOrb from './voice-orb'
 import { CopyButton, ShareButton, AssistantContent, BranchButton } from './message-content'
 import { ContextSourcesPanel } from './context-sources-panel'
@@ -274,6 +276,12 @@ export default function ChatWindow({
     }
   }
 
+  // Unlock audio playback on the user's first interaction with the page.
+  // Without this, spoken replies are silent on iOS: the reply arrives long
+  // after any gesture, and iOS only lets an element play if it has been
+  // played inside one at least once.
+  useEffect(() => installAudioUnlock(), [])
+
   useEffect(() => {
     // Warms the browser's voice list on mount rather than waiting for the
     // first spoken reply to trigger it — Chrome in particular can take up
@@ -373,7 +381,13 @@ export default function ChatWindow({
         const audioBlob = await fetchCloudSpeech(spokenText, lang)
         if (audioBlob) {
           const url = URL.createObjectURL(audioBlob)
-          const audio = new Audio(url)
+          // The shared, already-unlocked element rather than a new Audio():
+          // on iOS a freshly constructed element is blocked from playing
+          // outside a user gesture, and a spoken reply never is one. See
+          // lib/voice/audio-playback.ts.
+          const audio = getPlaybackElement()
+          if (!audio) return
+          audio.src = url
           cloudAudioRef.current = audio
           setIsSpeaking(true)
           const finish = (): void => {
@@ -831,9 +845,16 @@ export default function ChatWindow({
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
-      })
+      // Feature-detected rather than hardcoded to webm. Safari cannot record
+      // WebM at all and *throws from this constructor* when handed a type it
+      // does not support, which is why voice input was completely dead on
+      // iPhone — no prompt, no recording, tap or hold alike. Passing no
+      // mimeType lets the browser choose its own supported default.
+      const preferredMimeType = pickRecordingMimeType()
+      const recorder = new MediaRecorder(
+        stream,
+        preferredMimeType ? { mimeType: preferredMimeType } : undefined
+      )
       audioChunksRef.current = []
       // Starts false, not true: previously defaulted to true and only the
       // VAD's own eventual onSilence callback (below) ever set it — so a
@@ -867,7 +888,11 @@ export default function ChatWindow({
           return
         }
 
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        // Describe what was actually recorded. Claiming webm from a Safari
+        // MP4 recording would hand the transcription API a file whose
+        // contents contradict its type.
+        const recordedType = baseMimeType(mediaRecorderRef.current?.mimeType)
+        const blob = new Blob(audioChunksRef.current, { type: recordedType })
 
         setIsTranscribing(true)
         try {
@@ -875,7 +900,7 @@ export default function ChatWindow({
           const url = hint ? `/api/voice/transcribe?language=${hint}` : '/api/voice/transcribe'
           const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'audio/webm' },
+            headers: { 'Content-Type': recordedType },
             body: blob
           })
 
@@ -989,9 +1014,12 @@ export default function ChatWindow({
   // replacing it: tap remains the only path that works with a keyboard, a
   // mouse or assistive tech, and the only sane one for a long dictation.
   const holdToTalk = useHoldToTalk({
-    onHoldStart: () => void startRecording(),
-    onHoldEnd: stopRecording,
+    // Called synchronously from pointerdown so Safari still sees an active
+    // user gesture when getUserMedia runs — see the hook's own note.
+    onPressStart: () => void startRecording(),
+    onStop: stopRecording,
     onTap: () => toggleRecording(),
+    isRecording,
     disabled: isTranscribing
   })
 

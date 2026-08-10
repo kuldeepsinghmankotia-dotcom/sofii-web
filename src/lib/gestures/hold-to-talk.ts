@@ -4,34 +4,24 @@ import { useCallback, useRef } from 'react'
 import { haptic } from './haptics'
 
 /**
- * How long a press must last before it counts as a hold rather than a tap.
+ * How long a press must last to count as a hold rather than a tap.
  *
- * 250ms is the usual floor for "deliberate": below it, the press is
- * indistinguishable from a tap and users who meant to toggle end up
- * recording a fraction of a second of silence.
+ * 250ms is the usual floor for "deliberate": below it a press is
+ * indistinguishable from a tap.
  */
 export const HOLD_THRESHOLD_MS = 250
 
 /**
- * Whether this pointer should get hold-to-talk behaviour at all.
+ * Whether this pointer gets hold-to-talk behaviour.
  *
- * Touch and pen only. A mouse gets plain click-to-toggle: holding a mouse
- * button down for a moment before releasing is something people do without
- * meaning anything by it, and turning that into a recording that starts and
- * immediately stops would be a regression on desktop, where the existing
- * toggle works fine.
+ * Touch and pen only. A mouse keeps plain click-to-toggle: people hold a
+ * mouse button down briefly without meaning anything by it.
  */
 export function usesHoldGesture(pointerType: string): boolean {
   return pointerType === 'touch' || pointerType === 'pen'
 }
 
-/**
- * What a release means, given how long the press lasted.
- *
- * Separated from the hook so the timing rule is testable without a DOM:
- * it is the whole behaviour, and getting it wrong is the difference
- * between "hold to talk" and "tap does nothing".
- */
+/** What a release means, given how long the press lasted. */
 export function classifyRelease(heldMs: number, thresholdMs: number = HOLD_THRESHOLD_MS): 'tap' | 'hold' {
   return heldMs >= thresholdMs ? 'hold' : 'tap'
 }
@@ -44,109 +34,112 @@ export interface HoldToTalkHandlers {
 }
 
 export interface UseHoldToTalkOptions {
-  /** Begin recording. Called once the hold threshold is crossed. */
-  onHoldStart: () => void
-  /** Finish recording and send. Called on release after a hold. */
-  onHoldEnd: () => void
-  /** The existing tap behaviour (toggle recording on/off). */
+  /**
+   * Begin recording. Called synchronously from the pointerdown handler —
+   * see the note in onPointerDown about why that timing is mandatory.
+   */
+  onPressStart: () => void
+  /** Stop recording and send. Called when a hold is released. */
+  onStop: () => void
+  /** Click-to-toggle, for mice. */
   onTap: () => void
+  /** Whether a recording is already in progress. */
+  isRecording: boolean
   disabled?: boolean
 }
 
 /**
- * WhatsApp-style press-and-hold to record, release to send — layered on top
- * of the existing tap-to-toggle rather than replacing it.
+ * Press-and-hold to record, release to send — the WhatsApp voice-note
+ * gesture, layered over the existing tap-to-toggle rather than replacing it.
  *
- * Both gestures remain available deliberately: hold is what Indian users
- * already expect from voice notes, but tap-to-toggle is what works with a
- * keyboard, a mouse, and assistive technology, and is the only one usable
- * for a long dictation where holding a finger down for a minute is not
- * reasonable.
+ * Behaviour on touch:
+ *   - press when idle          -> starts recording immediately
+ *   - release after >= 250ms   -> stops and sends (a hold)
+ *   - release before 250ms     -> recording continues (a tap toggled it on)
+ *   - press while recording    -> stops on release (a tap toggled it off)
+ *
+ * Tap therefore still toggles, and hold still sends, from the same button.
  */
 export function useHoldToTalk({
-  onHoldStart,
-  onHoldEnd,
+  onPressStart,
+  onStop,
   onTap,
+  isRecording,
   disabled = false
 }: UseHoldToTalkOptions): HoldToTalkHandlers {
   const pressedAtRef = useRef<number | null>(null)
-  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const isHoldingRef = useRef(false)
-  // Set when a hold consumed the interaction, so the click event the browser
-  // still fires afterwards does not also toggle recording back on.
+  const wasRecordingAtPressRef = useRef(false)
   const suppressClickRef = useRef(false)
-
-  const clearTimer = useCallback(() => {
-    if (holdTimerRef.current !== null) {
-      clearTimeout(holdTimerRef.current)
-      holdTimerRef.current = null
-    }
-  }, [])
 
   const onPointerDown = useCallback(
     (event: React.PointerEvent) => {
       if (disabled || !usesHoldGesture(event.pointerType)) return
 
       pressedAtRef.current = Date.now()
-      isHoldingRef.current = false
+      wasRecordingAtPressRef.current = isRecording
+      // Touch fires a click after pointerup; this press already owns the
+      // interaction.
+      suppressClickRef.current = true
 
-      clearTimer()
-      holdTimerRef.current = setTimeout(() => {
-        isHoldingRef.current = true
-        // Confirms the mic is now live, which matters because the user's own
-        // finger is covering the button.
-        haptic('tick')
-        onHoldStart()
-      }, HOLD_THRESHOLD_MS)
+      if (isRecording) return
+
+      // Recording MUST start here, synchronously inside the pointerdown
+      // handler, and never from a timer.
+      //
+      // Safari only permits getUserMedia while a user gesture is still
+      // active, and that activation does not survive a setTimeout. An
+      // earlier version armed recording from a 250ms hold timer, which
+      // Safari silently refused: no permission prompt, no recording, nothing
+      // at all on iPhone. Chrome is lenient about this, so it looked fine
+      // everywhere else.
+      //
+      // Starting on press rather than on threshold also just feels better —
+      // the mic is live from the instant the finger lands, so the beginning
+      // of the sentence is not clipped.
+      haptic('tick')
+      onPressStart()
     },
-    [disabled, clearTimer, onHoldStart]
+    [disabled, isRecording, onPressStart]
   )
 
   const finishPress = useCallback(
-    (event: React.PointerEvent, cancelled: boolean) => {
+    (event: React.PointerEvent) => {
       if (disabled || !usesHoldGesture(event.pointerType)) return
-
-      clearTimer()
 
       const pressedAt = pressedAtRef.current
       pressedAtRef.current = null
-
       if (pressedAt === null) return
 
-      const wasHolding = isHoldingRef.current
-      isHoldingRef.current = false
+      const wasRecording = wasRecordingAtPressRef.current
+      wasRecordingAtPressRef.current = false
 
-      if (wasHolding) {
-        // The hold already started recording, so this release owns the
-        // interaction entirely — the click that follows must not toggle.
-        suppressClickRef.current = true
+      // Pressed while already recording: this is a tap to stop.
+      if (wasRecording) {
         haptic('confirm')
-        onHoldEnd()
+        onStop()
         return
       }
 
-      // Released before the threshold. A genuine cancel (pointer left the
-      // element, gesture interrupted) should do nothing at all; a normal
-      // release is a tap, which the click handler below will action.
-      if (cancelled) suppressClickRef.current = true
-      void classifyRelease(Date.now() - pressedAt)
+      // Released after a real hold: stop and send.
+      if (classifyRelease(Date.now() - pressedAt) === 'hold') {
+        haptic('confirm')
+        onStop()
+        return
+      }
+
+      // A quick tap started the recording and leaves it running, so the user
+      // can talk hands-free and tap again to stop.
     },
-    [disabled, clearTimer, onHoldEnd]
+    [disabled, onStop]
   )
 
-  const onPointerUp = useCallback(
-    (event: React.PointerEvent) => finishPress(event, false),
-    [finishPress]
-  )
+  const onPointerUp = useCallback((event: React.PointerEvent) => finishPress(event), [finishPress])
 
-  const onPointerCancel = useCallback(
-    (event: React.PointerEvent) => finishPress(event, true),
-    [finishPress]
-  )
+  // A cancelled gesture (finger dragged off, call interrupts) must not leave
+  // the microphone open.
+  const onPointerCancel = useCallback((event: React.PointerEvent) => finishPress(event), [finishPress])
 
   const onClick = useCallback(() => {
-    // Touch produces a click after pointerup; a hold has already handled the
-    // interaction and must swallow exactly one.
     if (suppressClickRef.current) {
       suppressClickRef.current = false
       return
