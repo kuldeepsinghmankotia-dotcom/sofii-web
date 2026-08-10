@@ -92,6 +92,21 @@ export function useSwipeAction({ onTrigger, disabled = false }: UseSwipeActionOp
   const onPointerDown = useCallback(
     (event: React.PointerEvent) => {
       if (disabled || (event.pointerType !== 'touch' && event.pointerType !== 'pen')) return
+
+      // Stop the pointerdown reaching an ancestor that also handles
+      // horizontal drags. The sidebar itself is draggable on mobile (swipe
+      // left to dismiss the whole panel), so without this a swipe starting
+      // on a row is claimed by the panel and closes it instead — the row
+      // never moves, and the gesture looks simply broken on a real phone.
+      //
+      // This runs in the bubble phase on the row, before the ancestor's own
+      // listener, which is what makes it effective. The cost is that the
+      // panel can no longer be dismissed by a drag that begins on a
+      // conversation row — acceptable, and arguably right: starting on a row
+      // means you intend to act on that row. Every other part of the panel
+      // still dismisses normally.
+      event.stopPropagation()
+
       startRef.current = { x: event.clientX, y: event.clientY }
       intentRef.current = 'undecided'
       armedRef.current = false
