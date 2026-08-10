@@ -1,6 +1,8 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getChatRatelimit } from '@/lib/redis/ratelimit'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { sendPushToUser } from '@/lib/push/send'
 
 const MAX_MESSAGE_CHARS = 4000
 const KINDS = ['suggestion', 'bug', 'help'] as const
@@ -52,5 +54,48 @@ export async function POST(request: NextRequest): Promise<Response> {
     return new Response('Could not save feedback', { status: 500 })
   }
 
+  // Notify admins immediately rather than waiting for them to think to
+  // open the inbox. Scheduled via after() so a slow push service never
+  // delays the user's "thanks, sent" — and never fails their submission,
+  // which is already safely stored by this point.
+  after(() => notifyAdminsOfFeedback(kind, message))
+
   return new Response(null, { status: 204 })
+}
+
+const KIND_TITLES: Record<Kind, string> = {
+  suggestion: 'New idea from a user',
+  bug: 'New bug report',
+  help: 'Someone needs help'
+}
+
+/**
+ * Best-effort admin notification. Uses the service-role client because it
+ * has to read *other* users' profiles and push subscriptions to find the
+ * admins — the requesting user's RLS-scoped client can see neither, and
+ * this runs after the response on the server, not on the user's behalf.
+ */
+async function notifyAdminsOfFeedback(kind: Kind, message: string): Promise<void> {
+  try {
+    const admin = createAdminClient()
+
+    const { data: admins } = await admin.from('profiles').select('id').eq('role', 'admin')
+    if (!admins || admins.length === 0) return
+
+    await Promise.all(
+      admins.map((row) =>
+        sendPushToUser(admin, row.id, {
+          title: KIND_TITLES[kind],
+          // Truncated: a push notification body is clipped by the OS
+          // anyway, and the full text is one tap away in the inbox.
+          body: message.length > 120 ? `${message.slice(0, 120)}…` : message,
+          url: '/admin/feedback'
+        })
+      )
+    )
+  } catch (err) {
+    // A failed notification must never look like a failed submission —
+    // the feedback row is already committed.
+    console.error('Admin feedback notification error:', err)
+  }
 }
