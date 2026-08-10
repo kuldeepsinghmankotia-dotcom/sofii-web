@@ -441,6 +441,24 @@ export type Database = {
         }
         Relationships: []
       }
+      service_endpoints: {
+        Row: {
+          key: string
+          updated_at: string
+          url: string
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          url: string
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          url?: string
+        }
+        Relationships: []
+      }
       system_prompts: {
         Row: {
           content: string

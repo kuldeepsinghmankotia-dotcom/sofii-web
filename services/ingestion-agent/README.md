@@ -67,14 +67,43 @@ cloudflared tunnel --url http://localhost:8000
 This prints a `https://<random>.trycloudflare.com` URL. It's a free
 "quick tunnel" — no Cloudflare account needed, but the URL changes every
 time you restart `cloudflared`, and Cloudflare gives no uptime guarantee
-for it. For a long-lived setup (a stable URL that doesn't need updating
-in Vercel every restart), switch to a named tunnel tied to a Cloudflare
-account + domain: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps
+for it. For a long-lived setup, switch to a named tunnel tied to a
+Cloudflare account + domain:
+https://developers.cloudflare.com/cloudflare-one/connections/connect-apps
 
-Whatever URL you get, set it as `INGEST_SERVICE_URL` in the Next.js app's
-`.env.local` (local dev) or Vercel project env vars (production) — and
-make sure `INGEST_SERVICE_SECRET` matches exactly between this service's
+Make sure `INGEST_SERVICE_SECRET` matches exactly between this service's
 `.env` and the Next.js app's env.
+
+### When the tunnel URL changes
+
+Just run:
+
+```bash
+./scripts/refresh-tunnel.sh
+```
+
+It health-checks the current tunnel, restarts `cloudflared` if needed, and
+then does two things with the new URL: rewrites `INGEST_SERVICE_URL` in the
+root `.env.local`, and upserts it into the `service_endpoints` table in
+Supabase.
+
+That second step is what matters for production. The deployed app resolves
+the ingestion URL from `service_endpoints` on every upload and only falls
+back to its `INGEST_SERVICE_URL` env var if nothing is registered — so a
+tunnel restart no longer needs a Vercel env edit or a redeploy. Before this,
+every restart silently broke all non-PDF uploads in production until someone
+noticed and manually redeployed.
+
+The registered value is not trusted blindly: it is the destination for a
+request carrying `INGEST_SERVICE_SECRET`, so it is checked against a
+hostname allowlist (`*.trycloudflare.com`, loopback, or whatever host
+`INGEST_SERVICE_URL` already names) and must be https off-loopback. A value
+that fails the check is ignored in favour of the env var, and logged. See
+`src/lib/db/service-endpoints.ts`.
+
+`service_endpoints` is readable and writable only by `service_role` — the
+`anon` and `authenticated` roles are revoked outright, since anyone able to
+write a row there could redirect the shared secret to a host they control.
 
 ## Test
 

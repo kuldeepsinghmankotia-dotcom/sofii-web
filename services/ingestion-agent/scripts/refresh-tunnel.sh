@@ -93,12 +93,54 @@ else
   echo "INGEST_SERVICE_URL=\"$NEW_URL\"" >> "$ENV_LOCAL"
 fi
 
-cat <<EOF
+# Publish to the service_endpoints registry, which is what the deployed app
+# actually reads (falling back to its env var only if nothing is
+# registered). This is the step that makes production pick up the new
+# hostname without an env-var edit or a redeploy - previously every tunnel
+# restart silently broke all non-PDF uploads in production until someone
+# noticed and manually redeployed.
+#
+# Writes to whichever Supabase project the *ingestion service* is
+# configured against, which is the same project the deployed app uses.
+SERVICE_ENV="$SERVICE_DIR/.env"
+SUPABASE_URL="$(grep -m1 '^SUPABASE_URL=' "$SERVICE_ENV" | cut -d= -f2- | tr -d '"')"
+SERVICE_KEY="$(grep -m1 '^SUPABASE_SERVICE_ROLE_KEY=' "$SERVICE_ENV" | cut -d= -f2- | tr -d '"')"
+
+registered=false
+if [ -n "$SUPABASE_URL" ] && [ -n "$SERVICE_KEY" ]; then
+  # on_conflict + merge-duplicates makes this an upsert on the primary key,
+  # so repeated runs update the single 'ingestion' row rather than erroring.
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+    "$SUPABASE_URL/rest/v1/service_endpoints?on_conflict=key" \
+    -H "apikey: $SERVICE_KEY" \
+    -H "Authorization: Bearer $SERVICE_KEY" \
+    -H "Content-Type: application/json" \
+    -H "Prefer: resolution=merge-duplicates" \
+    -d "{\"key\":\"ingestion\",\"url\":\"$NEW_URL\",\"updated_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" 2>/dev/null || true)"
+
+  case "$code" in
+    2*) registered=true ;;
+    *)  echo "WARNING: failed to register endpoint in Supabase (HTTP ${code:-no response})." >&2 ;;
+  esac
+else
+  echo "WARNING: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing from $SERVICE_ENV." >&2
+fi
+
+if [ "$registered" = true ]; then
+  cat <<EOF
+
+Done. .env.local updated, and $NEW_URL registered in Supabase.
+Production picks this up on its next upload - no redeploy needed.
+EOF
+else
+  cat <<EOF
 
 Done. .env.local updated for local dev.
 
-To make production use this new URL too, run:
+The Supabase registration did NOT succeed, so production is still pointing
+at the old URL. Either re-run this script, or fall back to the manual path:
   vercel env rm INGEST_SERVICE_URL production --yes
   echo -n "$NEW_URL" | vercel env add INGEST_SERVICE_URL production
   vercel --prod
 EOF
+fi

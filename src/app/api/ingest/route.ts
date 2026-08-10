@@ -4,6 +4,7 @@ import type { SupabaseClient, User } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 import { createClient } from '@/lib/supabase/server'
 import { createIngestionJob, markIngestionJobFailed } from '@/lib/db/ingestion-jobs'
+import { resolveIngestServiceUrl } from '@/lib/db/service-endpoints'
 import { getIngestRatelimit } from '@/lib/redis/ratelimit'
 import { fetchPublicUrl } from '@/lib/security/url-fetch-guard'
 
@@ -49,7 +50,10 @@ async function startIngestionJob(
   user: User,
   params: { filename: string; mimeType: string; bytes: Blob | Buffer }
 ): Promise<Response> {
-  const serviceUrl = process.env.INGEST_SERVICE_URL
+  // Resolved per-request rather than read from the env at build time: the
+  // quick tunnel's hostname changes on every cloudflared restart, and this
+  // lets the refresh script publish the new one without a redeploy.
+  const serviceUrl = await resolveIngestServiceUrl()
   const serviceSecret = process.env.INGEST_SERVICE_SECRET
 
   if (!serviceUrl || !serviceSecret) {
