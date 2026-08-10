@@ -2,8 +2,8 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { AnimatePresence, motion, useAnimation, type PanInfo } from 'framer-motion'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { AnimatePresence, motion, useAnimation, useReducedMotion, type PanInfo } from 'framer-motion'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
 import {
@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { ConversationSummary } from '@/lib/db/conversations'
+import { useSwipeAction } from '@/lib/gestures/swipe-action'
 import SignOutButton from './sign-out-button'
 import ThemeToggle from './theme-toggle'
 import { Tooltip } from './tooltip'
@@ -62,6 +63,106 @@ const ADMIN_LINKS = [
 ]
 
 type Group = { label: string; items: ConversationSummary[] }
+
+/**
+ * One conversation in the list.
+ *
+ * Split out of the map purely so it can hold a hook: swipe state is
+ * per-row, and hooks cannot be called inside a loop callback.
+ *
+ * The swipe is an addition, not a replacement — the "..." menu still holds
+ * Rename and Delete, and remains the only route available with a keyboard,
+ * a mouse, or a screen reader. Swiping only ever *opens the existing
+ * confirmation dialog*: a gesture this easy to perform by accident while
+ * scrolling must not be able to destroy a conversation on its own.
+ */
+function ConversationRow({
+  conversation,
+  isActive,
+  onNavigate,
+  onRequestDelete,
+  children
+}: {
+  conversation: ConversationSummary
+  isActive: boolean
+  onNavigate: () => void
+  onRequestDelete: () => void
+  children: ReactNode
+}) {
+  const reducedMotion = useReducedMotion()
+  const { offset, armed, handlers } = useSwipeAction({ onTrigger: onRequestDelete })
+
+  return (
+    // The wrapper stays put and hosts the revealed action; only the inner
+    // surface travels, so the affordance appears from underneath rather
+    // than sliding in alongside.
+    <div className="relative overflow-hidden rounded-lg">
+      {offset < 0 && (
+        <div
+          aria-hidden="true"
+          className={`absolute inset-y-0 right-0 flex items-center justify-center rounded-r-lg pr-3 pl-4 transition-colors ${
+            armed ? 'bg-[var(--danger)] text-white' : 'bg-red-500/15 text-[var(--danger)]'
+          }`}
+        >
+          <Trash2 size={16} />
+        </div>
+      )}
+
+      <div
+        {...handlers}
+        // Transform is driven directly rather than through framer-motion's
+        // `animate`, which was measured setting `transform: none` on this
+        // element even while offset was clearly negative — the row simply
+        // never moved. Direct style is also the better fit for a drag: it
+        // tracks the finger exactly, with none of the lag a spring
+        // introduces between the touch and the row.
+        style={{
+          transform: `translateX(${offset}px)`,
+          // Only the snap back is animated. While a finger is down the row
+          // must follow it 1:1, so any transition there would feel like the
+          // row is lagging behind the touch.
+          transition: offset === 0 && !reducedMotion ? 'transform 180ms ease-out' : 'none'
+        }}
+        className={`group relative flex touch-pan-y items-center gap-1 rounded-lg py-1.5 pr-1 pl-3 text-sm ${
+          isActive
+            ? 'bg-[var(--surface-active)]'
+            : // Opaque only while the row is actually travelling, so it hides
+              // the delete affordance underneath. At rest it must stay
+              // transparent: the sidebar is a translucent `glass` panel, and
+              // a solid fill here reads as a filled box against it.
+              offset < 0
+              ? 'bg-[var(--bg-elevated)]'
+              : 'hover:bg-[var(--surface-hover)]'
+        }`}
+      >
+        {isActive && (
+          <span
+            aria-hidden="true"
+            className="absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-full"
+            style={{ background: 'var(--accent-gradient)' }}
+          />
+        )}
+        <Link
+          href={`/c/${conversation.id}`}
+          // A swipe ends with a pointerup over the link, which the browser
+          // then turns into a click. Without this, swiping to delete also
+          // navigates to the conversation being deleted.
+          onClick={(event) => {
+            if (offset !== 0) {
+              event.preventDefault()
+              return
+            }
+            onNavigate()
+          }}
+          className={`min-w-0 flex-1 truncate ${isActive ? 'text-[var(--text)]' : 'text-[var(--text-muted)] group-hover:text-[var(--text)]'}`}
+        >
+          {conversation.title}
+        </Link>
+        {children}
+      </div>
+    </div>
+  )
+}
 
 function groupByRecency(items: ConversationSummary[]): Group[] {
   const now = new Date()
@@ -328,25 +429,12 @@ export default function Sidebar({
                         className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-input-strong)] px-2 py-1.5 text-sm text-[var(--text)] outline-none"
                       />
                     ) : (
-                      <div
-                        className={`group relative flex items-center gap-1 rounded-lg py-1.5 pr-1 pl-3 text-sm ${
-                          activeId === c.id ? 'bg-[var(--surface-active)]' : 'hover:bg-[var(--surface-hover)]'
-                        }`}
+                      <ConversationRow
+                        conversation={c}
+                        isActive={activeId === c.id}
+                        onNavigate={onClose}
+                        onRequestDelete={() => setConfirmDeleteId(c.id)}
                       >
-                        {activeId === c.id && (
-                          <span
-                            aria-hidden="true"
-                            className="absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-full"
-                            style={{ background: 'var(--accent-gradient)' }}
-                          />
-                        )}
-                        <Link
-                          href={`/c/${c.id}`}
-                          onClick={onClose}
-                          className={`min-w-0 flex-1 truncate ${activeId === c.id ? 'text-[var(--text)]' : 'text-[var(--text-muted)] group-hover:text-[var(--text)]'}`}
-                        >
-                          {c.title}
-                        </Link>
                         <DropdownMenu.Root>
                           <DropdownMenu.Trigger asChild>
                             <button
@@ -379,7 +467,7 @@ export default function Sidebar({
                             </DropdownMenu.Content>
                           </DropdownMenu.Portal>
                         </DropdownMenu.Root>
-                      </div>
+                      </ConversationRow>
                     )}
                   </li>
                 ))}
