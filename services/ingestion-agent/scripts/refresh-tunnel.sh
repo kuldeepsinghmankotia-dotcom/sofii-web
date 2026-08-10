@@ -40,8 +40,55 @@ is_healthy() {
     "$url/health" -H "Authorization: Bearer $SECRET" 2>/dev/null | grep -q '^200$'
 }
 
+# Publishes the given URL to the service_endpoints registry, which is what
+# the deployed app reads (falling back to its env var only when nothing is
+# registered). Defined before first use because the healthy path needs it
+# too - see the note there.
+#
+# Writes to whichever Supabase project the *ingestion service* is configured
+# against, which is the same project the deployed app uses.
+register_endpoint() {
+  local url="$1"
+  local service_env="$SERVICE_DIR/.env"
+  local supabase_url service_key code
+
+  supabase_url="$(grep -m1 '^SUPABASE_URL=' "$service_env" | cut -d= -f2- | tr -d '"')"
+  service_key="$(grep -m1 '^SUPABASE_SERVICE_ROLE_KEY=' "$service_env" | cut -d= -f2- | tr -d '"')"
+
+  if [ -z "$supabase_url" ] || [ -z "$service_key" ]; then
+    echo "WARNING: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing from $service_env." >&2
+    return 1
+  fi
+
+  # on_conflict + merge-duplicates makes this an upsert on the primary key,
+  # so repeated runs update the single 'ingestion' row rather than erroring.
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+    "$supabase_url/rest/v1/service_endpoints?on_conflict=key" \
+    -H "apikey: $service_key" \
+    -H "Authorization: Bearer $service_key" \
+    -H "Content-Type: application/json" \
+    -H "Prefer: resolution=merge-duplicates" \
+    -d "{\"key\":\"ingestion\",\"url\":\"$url\",\"updated_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" 2>/dev/null || true)"
+
+  case "$code" in
+    2*) return 0 ;;
+    *)  echo "WARNING: failed to register endpoint in Supabase (HTTP ${code:-no response})." >&2
+        return 1 ;;
+  esac
+}
+
 if is_healthy "$CURRENT_URL"; then
-  echo "Tunnel is healthy - no action needed."
+  # Still (re)register even though nothing needs restarting. Exiting here
+  # without registering would mean a healthy tunnel never gets published at
+  # all, so the very first run after this feature shipped - and any run
+  # where the registry was cleared or never populated - would leave
+  # production on a stale env var while cheerfully reporting success.
+  if register_endpoint "$CURRENT_URL"; then
+    echo "Tunnel is healthy - no restart needed. Registered $CURRENT_URL in Supabase."
+  else
+    echo "Tunnel is healthy - no restart needed, but registration failed (see warning above)." >&2
+    exit 1
+  fi
   exit 0
 fi
 
@@ -93,37 +140,11 @@ else
   echo "INGEST_SERVICE_URL=\"$NEW_URL\"" >> "$ENV_LOCAL"
 fi
 
-# Publish to the service_endpoints registry, which is what the deployed app
-# actually reads (falling back to its env var only if nothing is
-# registered). This is the step that makes production pick up the new
-# hostname without an env-var edit or a redeploy - previously every tunnel
-# restart silently broke all non-PDF uploads in production until someone
-# noticed and manually redeployed.
-#
-# Writes to whichever Supabase project the *ingestion service* is
-# configured against, which is the same project the deployed app uses.
-SERVICE_ENV="$SERVICE_DIR/.env"
-SUPABASE_URL="$(grep -m1 '^SUPABASE_URL=' "$SERVICE_ENV" | cut -d= -f2- | tr -d '"')"
-SERVICE_KEY="$(grep -m1 '^SUPABASE_SERVICE_ROLE_KEY=' "$SERVICE_ENV" | cut -d= -f2- | tr -d '"')"
-
+# This is the step that makes production pick up the new hostname without an
+# env-var edit or a redeploy.
 registered=false
-if [ -n "$SUPABASE_URL" ] && [ -n "$SERVICE_KEY" ]; then
-  # on_conflict + merge-duplicates makes this an upsert on the primary key,
-  # so repeated runs update the single 'ingestion' row rather than erroring.
-  code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
-    "$SUPABASE_URL/rest/v1/service_endpoints?on_conflict=key" \
-    -H "apikey: $SERVICE_KEY" \
-    -H "Authorization: Bearer $SERVICE_KEY" \
-    -H "Content-Type: application/json" \
-    -H "Prefer: resolution=merge-duplicates" \
-    -d "{\"key\":\"ingestion\",\"url\":\"$NEW_URL\",\"updated_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" 2>/dev/null || true)"
-
-  case "$code" in
-    2*) registered=true ;;
-    *)  echo "WARNING: failed to register endpoint in Supabase (HTTP ${code:-no response})." >&2 ;;
-  esac
-else
-  echo "WARNING: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing from $SERVICE_ENV." >&2
+if register_endpoint "$NEW_URL"; then
+  registered=true
 fi
 
 if [ "$registered" = true ]; then
