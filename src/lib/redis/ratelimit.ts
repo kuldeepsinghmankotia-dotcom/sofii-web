@@ -11,6 +11,7 @@ let chatLimiter: Ratelimit | null = null
 let queryLimiter: Ratelimit | null = null
 let ingestLimiter: Ratelimit | null = null
 let speakLimiter: Ratelimit | null = null
+let whatsappLimiter: Ratelimit | null = null
 
 export function getChatRatelimit(): Ratelimit {
   if (!chatLimiter) {
@@ -59,4 +60,21 @@ export function getSpeakRatelimit(): Ratelimit {
     })
   }
   return speakLimiter
+}
+
+// WhatsApp messages get their own budget rather than sharing the chat
+// limiter. The channel is inherently chatty - people fire off several short
+// messages in a row where they would send one longer one on the web - and a
+// shared bucket would let a WhatsApp burst lock the user out of the app they
+// are also using. Keyed by account, since model spend belongs to the
+// account, not to the phone number.
+export function getWhatsAppRatelimit(): Ratelimit {
+  if (!whatsappLimiter) {
+    whatsappLimiter = new Ratelimit({
+      redis: getRedis(),
+      limiter: Ratelimit.slidingWindow(30, '10 m'),
+      prefix: 'ratelimit:whatsapp'
+    })
+  }
+  return whatsappLimiter
 }
