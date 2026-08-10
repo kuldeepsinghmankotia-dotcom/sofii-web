@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import {
   detectConfidentScriptLanguage,
   detectScriptLanguage,
+  refineSpeechLanguage,
   detectSpeechLanguage,
   keepSpeechAlive,
   pickBestVoice,
@@ -287,5 +288,36 @@ describe('keepSpeechAlive', () => {
     vi.advanceTimersByTime(10_000)
     expect(pause).not.toHaveBeenCalled()
     expect(resume).not.toHaveBeenCalled()
+  })
+})
+
+describe('refineSpeechLanguage', () => {
+  it('upgrades the Devanagari bucket to the language Saaras actually identified', () => {
+    // The whole point: script detection reports Marathi as hi-IN, so
+    // without this a Marathi speaker is answered in a Hindi voice.
+    expect(refineSpeechLanguage('hi-IN', 'mr-IN')).toBe('mr-IN')
+    expect(refineSpeechLanguage('hi-IN', 'ne-IN')).toBe('ne-IN')
+  })
+
+  it('leaves a genuine Hindi conversation alone', () => {
+    expect(refineSpeechLanguage('hi-IN', 'hi-IN')).toBe('hi-IN')
+  })
+
+  it('does not override across scripts', () => {
+    // An English sentence inside a Marathi conversation must still be
+    // spoken by an English voice — the confirmed language describes the
+    // speaker, not this particular reply.
+    expect(refineSpeechLanguage('en-US', 'mr-IN')).toBe('en-US')
+    expect(refineSpeechLanguage('ta-IN', 'mr-IN')).toBe('ta-IN')
+    expect(refineSpeechLanguage('ja-JP', 'hi-IN')).toBe('ja-JP')
+  })
+
+  it('never promotes a non-Devanagari language into the Devanagari bucket', () => {
+    // Bengali is its own script; a stray confirmation must not hijack it.
+    expect(refineSpeechLanguage('hi-IN', 'bn-IN')).toBe('hi-IN')
+  })
+
+  it('falls back to the script language when nothing was confirmed', () => {
+    expect(refineSpeechLanguage('hi-IN', null)).toBe('hi-IN')
   })
 })

@@ -147,6 +147,42 @@ export function detectSpeechLanguage(text: string): string {
   )
 }
 
+// Languages written in Devanagari. Script detection cannot tell them apart
+// and necessarily reports all of them as Hindi (see SCRIPT_RANGES), so this
+// is the set where a language *confirmed* by the speech model is strictly
+// better evidence than anything derivable from the characters.
+const DEVANAGARI_LANGS = new Set(['hi', 'mr', 'ne', 'sa', 'kok', 'mai', 'bho'])
+
+/**
+ * Improve a script-derived language using one the speech-to-text model
+ * actually identified.
+ *
+ * Saaras returns a real `language_code` per utterance, which is how Marathi
+ * stops being spoken back in a Hindi voice. Without this the better
+ * evidence is simply discarded and playback falls back to the character
+ * ranges, which cannot distinguish the two.
+ *
+ * The override is deliberately confined to the same script. An English
+ * sentence inside a Marathi conversation must still be spoken by an English
+ * voice — the confirmed language describes what the *user* speaks, not what
+ * this particular reply is written in.
+ */
+export function refineSpeechLanguage(scriptLang: string, confirmedLang: string | null): string {
+  if (!confirmedLang) return scriptLang
+
+  const confirmedBase = confirmedLang.toLowerCase().split('-')[0]
+  const scriptBase = scriptLang.toLowerCase().split('-')[0]
+
+  if (scriptBase === confirmedBase) return scriptLang
+
+  // 'hi' is the Devanagari bucket, not necessarily Hindi.
+  if (scriptBase === 'hi' && DEVANAGARI_LANGS.has(confirmedBase)) {
+    return `${confirmedBase}-IN`
+  }
+
+  return scriptLang
+}
+
 // Chrome in particular returns an empty voice list on the very first call —
 // getVoices() only populates after the async 'voiceschanged' event fires,
 // especially on a cold page load before the speech engine has enumerated

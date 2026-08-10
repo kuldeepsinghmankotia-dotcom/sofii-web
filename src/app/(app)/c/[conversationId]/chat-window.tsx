@@ -42,6 +42,7 @@ import { downloadConversationAsMarkdown } from '@/lib/export/markdown'
 import {
   detectConfidentScriptLanguage,
   detectSpeechLanguage,
+  refineSpeechLanguage,
   keepSpeechAlive,
   loadVoices,
   pickBestVoice,
@@ -249,6 +250,12 @@ export default function ChatWindow({
   // flip-flopping turn to turn (the reported Hindi-transcribed-as-Chinese
   // bug) instead of re-guessing from scratch on every single utterance.
   const speechLangHintRef = useRef<string | null>(null)
+  // The full BCP-47 code Saaras identified (e.g. 'mr-IN'), kept separately
+  // from speechLangHintRef because that one holds the bare two-letter code
+  // the transcribe endpoint accepts. This is what lets a reply be spoken in
+  // the language the user actually speaks rather than whatever its script
+  // implies — see refineSpeechLanguage.
+  const confirmedSpeechLangRef = useRef<string | null>(null)
   // The currently-playing cloud-TTS <audio> element, if any — tracked
   // separately from the browser voice path (which has its own built-in
   // "one utterance at a time" queue via speechSynthesis) since a plain
@@ -353,7 +360,7 @@ export default function ChatWindow({
     stopAnySpeech()
 
     void (async () => {
-      const lang = detectSpeechLanguage(spokenText)
+      const lang = refineSpeechLanguage(detectSpeechLanguage(spokenText), confirmedSpeechLangRef.current)
 
       // Cloud TTS (Groq-hosted Orpheus) first, for the languages it
       // covers — genuinely natural neural voice quality, not just "the
@@ -873,7 +880,23 @@ export default function ChatWindow({
 
           if (!response.ok) throw new Error(await response.text())
 
-          const { text } = (await response.json()) as { text: string }
+          const { text, languageCode, languageProbability } = (await response.json()) as {
+            text: string
+            languageCode?: string | null
+            languageProbability?: number | null
+          }
+
+          // Saaras identifies the language of the utterance itself, which is
+          // strictly better evidence than inspecting the characters it
+          // returned: Hindi and Marathi share Devanagari, so script analysis
+          // reports both as Hindi and Marathi replies get spoken in a Hindi
+          // voice. Only trusted above a high confidence bar — a low-
+          // confidence guess is worse than the script fallback below,
+          // because this value persists for the rest of the conversation.
+          if (languageCode && (languageProbability ?? 0) >= 0.8) {
+            confirmedSpeechLangRef.current = languageCode
+            speechLangHintRef.current = languageCode.split('-')[0]
+          }
           // Locks in a hint for every later recording in this conversation
           // once real script evidence shows up — see speechLangHintRef's
           // own comment. detectConfidentScriptLanguage (not the plain
@@ -884,8 +907,12 @@ export default function ChatWindow({
           // Never downgraded back to null by Latin-script text afterward:
           // a confirmed non-English speaker occasionally saying an
           // English word/name shouldn't reset the hint.
-          const detectedScript = detectConfidentScriptLanguage(text)
-          if (detectedScript) speechLangHintRef.current = detectedScript.split('-')[0]
+          // Fallback only — skipped entirely when Saaras already told us the
+          // language above, since script evidence can only ever be weaker.
+          if (!confirmedSpeechLangRef.current) {
+            const detectedScript = detectConfidentScriptLanguage(text)
+            if (detectedScript) speechLangHintRef.current = detectedScript.split('-')[0]
+          }
 
           if (text.trim()) {
             // sendMessage clears voiceTurnActive itself once the whole
