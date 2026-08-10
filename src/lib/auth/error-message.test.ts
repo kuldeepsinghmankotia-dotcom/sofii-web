@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { authErrorMessage } from './error-message'
+import { authError, authErrorMessage } from './error-message'
 
 describe('authErrorMessage', () => {
   it('never shows an empty object, the bug that prompted this', () => {
@@ -55,5 +55,22 @@ describe('authErrorMessage', () => {
     for (const input of ['{}', '', '...', 'null', '!!', undefined, null]) {
       expect(authErrorMessage(input).length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('authError', () => {
+  it('identifies a rate limit from the status when the body is empty', () => {
+    // The case that made this intermittent failure unrecognisable: a 429
+    // arriving with no body, so there is no message to match on at all.
+    expect(authError({ status: 429 })).toMatch(/wait a minute/i)
+    expect(authError({ status: 429, message: '' })).toMatch(/wait a minute/i)
+  })
+
+  it('still translates the message when there is one', () => {
+    expect(authError({ message: 'Invalid login credentials' })).toMatch(/don't match/i)
+  })
+
+  it('handles a null error without throwing', () => {
+    expect(authError(null)).toMatch(/went wrong/i)
   })
 })

@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { authErrorMessage } from '@/lib/auth/error-message'
+import { authError } from '@/lib/auth/error-message'
 
 export default function SignInPage() {
   const router = useRouter()
@@ -39,7 +39,7 @@ export default function SignInPage() {
     setLoading(false)
 
     if (error) {
-      setError(authErrorMessage(error.message))
+      setError(authError(error))
       return
     }
 

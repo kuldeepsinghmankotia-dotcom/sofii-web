@@ -57,6 +57,41 @@ const KNOWN: { match: RegExp; message: string }[] = [
 
 const FALLBACK = 'Something went wrong. Please try again.'
 
+/**
+ * Translate an auth error for display, and log the original.
+ *
+ * Sanitising the message cost something real: the first version of this
+ * replaced a bare "{}" with a friendly sentence and, in doing so, threw away
+ * the only evidence of what had actually failed — an intermittent fault
+ * became undiagnosable for both the user and whoever was debugging it. The
+ * original always goes to the console, where it costs the user nothing and
+ * is there when someone needs it.
+ *
+ * Pass the whole error object where possible: a rate-limited response can
+ * arrive with an empty body and therefore no message at all, and the status
+ * is then the only thing that identifies it.
+ */
+export function authError(error: { message?: string; status?: number; name?: string } | null): string {
+  if (error) {
+    console.error('Auth error:', {
+      name: error.name,
+      status: error.status,
+      message: error.message,
+      // Explicit, because an empty message is exactly the case that is
+      // impossible to recognise from the translated text alone.
+      emptyMessage: !error.message?.trim()
+    })
+  }
+
+  // A 429 often carries no body, so status is the only signal it was a rate
+  // limit rather than a genuine failure.
+  if (error?.status === 429) {
+    return 'Too many attempts just now. Wait a minute and try again.'
+  }
+
+  return authErrorMessage(error?.message)
+}
+
 export function authErrorMessage(raw: string | null | undefined): string {
   if (!raw) return FALLBACK
 
