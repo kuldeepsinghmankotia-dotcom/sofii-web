@@ -95,12 +95,32 @@ interface BulbulResponse {
 }
 
 /**
+ * Synthesise speech as OGG/Opus, the only audio format WhatsApp accepts for
+ * voice notes.
+ *
+ * Bulbul can emit Ogg/Opus directly, which avoids needing ffmpeg in a
+ * serverless function to transcode its WAV — verified against the live API:
+ * the bytes come back with an `OggS` magic and an `OpusHead` header.
+ *
+ * The sample rate is not optional. Opus only permits 8/12/16/24/48 kHz and
+ * Bulbul defaults to 22050, so omitting it is a hard 400 rather than a
+ * quietly resampled file.
+ */
+export async function synthesiseOpus(text: string, lang: string): Promise<ArrayBuffer | null> {
+  return synthesiseWithBulbul(text, lang, { codec: 'opus', sampleRate: 24000 })
+}
+
+/**
  * Synthesise Indic speech with Bulbul.
  *
- * Returns raw WAV bytes, or null on any failure (including an unsupported
+ * Returns raw audio bytes, or null on any failure (including an unsupported
  * language) so the caller can fall through to the next provider.
  */
-export async function synthesiseWithBulbul(text: string, lang: string): Promise<ArrayBuffer | null> {
+export async function synthesiseWithBulbul(
+  text: string,
+  lang: string,
+  options?: { codec?: 'wav' | 'opus'; sampleRate?: number }
+): Promise<ArrayBuffer | null> {
   const base = lang.toLowerCase().split('-')[0]
   const languageCode = `${base === 'or' ? 'od' : base}-IN`
 
@@ -115,7 +135,8 @@ export async function synthesiseWithBulbul(text: string, lang: string): Promise<
       language_code: languageCode,
       model: BULBUL_MODEL,
       speaker: BULBUL_SPEAKER,
-      output_audio_codec: 'wav'
+      output_audio_codec: options?.codec ?? 'wav',
+      ...(options?.sampleRate ? { speech_sample_rate: options.sampleRate } : {})
     }
   })
 

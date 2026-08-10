@@ -1,6 +1,14 @@
 import { NextRequest, after } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getWhatsAppConfig, markWhatsAppRead, sendWhatsAppText, type WhatsAppConfig } from '@/lib/whatsapp/client'
+import {
+  downloadWhatsAppMedia,
+  getWhatsAppConfig,
+  markWhatsAppRead,
+  sendWhatsAppAudio,
+  sendWhatsAppText,
+  uploadWhatsAppMedia,
+  type WhatsAppConfig
+} from '@/lib/whatsapp/client'
 import { resolveVerificationChallenge, verifyWebhookSignature } from '@/lib/whatsapp/signature'
 import { extractMessages, type WhatsAppMessage, type WhatsAppWebhookPayload } from '@/lib/whatsapp/types'
 import {
@@ -12,6 +20,9 @@ import {
 } from '@/lib/whatsapp/linking'
 import { generateReply } from '@/lib/chat/generate-reply'
 import { getWhatsAppRatelimit } from '@/lib/redis/ratelimit'
+import { isSarvamConfigured } from '@/lib/sarvam/client'
+import { BULBUL_MAX_CHARS, synthesiseOpus, transcribeWithSaaras } from '@/lib/sarvam/speech'
+import { supportsBulbul } from '@/lib/sarvam/languages'
 
 // The WhatsApp Cloud API webhook.
 //
@@ -137,13 +148,32 @@ async function handleMessage(
     return
   }
 
-  if (!text) {
-    // Voice notes, images and documents are handled in a later pass; saying
-    // so is better than silence, which reads as being ignored.
+  // A voice note is transcribed and then treated exactly like typed text.
+  // This is the interaction that actually matters in India: sending a voice
+  // note is second nature on WhatsApp, and for a lot of people it is far
+  // easier than typing in their own language.
+  let spokenLanguage: string | null = null
+  let prompt = text
+
+  if (!prompt && message.type === 'audio') {
+    const transcription = await transcribeVoiceNote(config, message)
+    if (!transcription) {
+      await sendWhatsAppText(
+        config,
+        phone,
+        "I couldn't make that voice note out — could you try again, or type it?"
+      )
+      return
+    }
+    prompt = transcription.text
+    spokenLanguage = transcription.languageCode
+  }
+
+  if (!prompt) {
     await sendWhatsAppText(
       config,
       phone,
-      "I can only read text messages here for now — voice notes and files are coming. Type it out and I'll help."
+      "I can handle text and voice notes here — images and files are coming. Type it out and I'll help."
     )
     return
   }
@@ -158,14 +188,81 @@ async function handleMessage(
     supabase,
     userId: link.userId,
     conversationId,
-    userText: text
+    userText: prompt
   })
 
-  await sendWhatsAppText(
-    config,
-    phone,
-    reply ?? "I didn't quite catch that — could you rephrase?"
-  )
+  if (!reply) {
+    await sendWhatsAppText(config, phone, "I didn't quite catch that — could you rephrase?")
+    return
+  }
+
+  // Answer in the medium the question arrived in: a voice note gets a voice
+  // note back. Text is always sent too, so the reply is still readable in a
+  // noisy room or on a bad connection, and so nothing is lost if the audio
+  // fails to send.
+  await sendWhatsAppText(config, phone, reply)
+
+  if (spokenLanguage) {
+    await replyWithVoiceNote(config, phone, reply, spokenLanguage)
+  }
+}
+
+/**
+ * Transcribe an incoming voice note.
+ *
+ * WhatsApp delivers voice notes as OGG/Opus, which Saaras accepts directly —
+ * no transcoding needed. Returns null on any failure so the caller can say
+ * so rather than answering a question it never heard.
+ */
+async function transcribeVoiceNote(
+  config: WhatsAppConfig,
+  message: WhatsAppMessage
+): Promise<{ text: string; languageCode: string | null } | null> {
+  if (!isSarvamConfigured()) return null
+
+  const media = (message as { audio?: { id?: string } }).audio
+  if (!media?.id) return null
+
+  const file = await downloadWhatsAppMedia(config, media.id)
+  if (!file) return null
+
+  // No language hint: Saaras auto-detects, and its answer is better evidence
+  // than anything we could infer from a phone number's country code.
+  const result = await transcribeWithSaaras(file.bytes, file.mimeType, null)
+  if (!result?.text.trim()) return null
+
+  return { text: result.text.trim(), languageCode: result.languageCode }
+}
+
+/**
+ * Speak a reply back as a WhatsApp voice note.
+ *
+ * Best-effort throughout: the text reply has already been sent, so every
+ * failure here costs a nicety rather than the answer.
+ */
+async function replyWithVoiceNote(
+  config: WhatsAppConfig,
+  phone: string,
+  reply: string,
+  languageCode: string
+): Promise<void> {
+  try {
+    // Bulbul covers 11 languages against Saaras's 23, so a question it could
+    // hear is not necessarily one it can speak back.
+    if (!supportsBulbul(languageCode)) return
+
+    // Bulbul caps input, and a voice note reading out several paragraphs is
+    // unpleasant regardless — the full answer is already there in text.
+    const audio = await synthesiseOpus(reply.slice(0, BULBUL_MAX_CHARS), languageCode)
+    if (!audio) return
+
+    const mediaId = await uploadWhatsAppMedia(config, audio, 'audio/ogg', 'reply.ogg')
+    if (!mediaId) return
+
+    await sendWhatsAppAudio(config, phone, mediaId)
+  } catch (error) {
+    console.error('Voice note reply failed:', error instanceof Error ? error.message : error)
+  }
 }
 
 /**
