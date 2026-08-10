@@ -48,6 +48,18 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: 'black-translucent',
     title: 'Sofii'
+  },
+  // iOS does not read the manifest's icons array when adding to the Home
+  // Screen — it looks for an apple-touch-icon and, finding none, uses a
+  // screenshot of the page instead. That was the gap: the manifest and its
+  // icons already existed, but the Home Screen icon on iPhone was not one
+  // of them.
+  //
+  // Served from the same manifest-icon route as everything else rather than
+  // a static PNG, for the reason manifest.ts gives: the gradient is defined
+  // once in globals.css and a hand-exported file would drift from it.
+  icons: {
+    apple: [{ url: '/manifest-icon?size=192', sizes: '192x192', type: 'image/png' }]
   }
 }
 

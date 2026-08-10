@@ -5,6 +5,7 @@ import { listConversations } from '@/lib/db/conversations'
 import { getOwnRole } from '@/lib/db/profiles'
 import AppShell from './app-shell'
 import Onboarding from './onboarding'
+import InstallPrompt from './install-prompt'
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const supabase = await createClient()
@@ -39,6 +40,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       isAdmin={role === 'admin'}
     >
       {needsOnboarding && <Onboarding />}
+      {/* Never alongside onboarding: two overlays on a first visit is a wall,
+          and the tour matters more than the install nudge. */}
+      {!needsOnboarding && <InstallPrompt />}
       {children}
     </AppShell>
   )
