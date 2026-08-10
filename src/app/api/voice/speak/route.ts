@@ -2,6 +2,9 @@ import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getGroqClient } from '@/lib/groq/client'
 import { getSpeakRatelimit } from '@/lib/redis/ratelimit'
+import { isSarvamConfigured } from '@/lib/sarvam/client'
+import { synthesiseWithBulbul } from '@/lib/sarvam/speech'
+import { supportsBulbul } from '@/lib/sarvam/languages'
 
 // Groq hosts Orpheus (Canopy Labs), a genuinely natural neural TTS model —
 // the same class of voice quality other assistant apps use, a real step up
@@ -27,6 +30,20 @@ const GROQ_MODELS: Record<string, { model: string; voice: string }> = {
 // Matches the OpenAI-compatible API's own 4096-char input cap with a
 // little headroom, rather than letting a long reply hit a 400 downstream.
 const MAX_INPUT_CHARS = 4000
+
+// Indian languages only — returns null for everything else so the chain
+// falls through to Groq/ElevenLabs unchanged. English is deliberately left
+// to Groq even though Bulbul supports en-IN: Groq's English is already
+// working and costs nothing.
+async function speakViaSarvam(text: string, lang: string): Promise<Response | null> {
+  if (!isSarvamConfigured()) return null
+  if (!supportsBulbul(lang) || lang.toLowerCase().split('-')[0] === 'en') return null
+
+  const audio = await synthesiseWithBulbul(text, lang)
+  if (!audio) return null
+
+  return new Response(audio, { headers: { 'Content-Type': 'audio/wav' } })
+}
 
 async function speakViaGroq(text: string, lang: string): Promise<Response | null> {
   const config = GROQ_MODELS[lang]
@@ -64,7 +81,26 @@ const ELEVENLABS_MODEL = 'eleven_multilingual_v2'
 // library, not a custom clone.
 const ELEVENLABS_VOICE_ID = 'EXAVITQu4vr4xnSDxMaL'
 
-async function speakViaElevenLabs(text: string): Promise<Response | null> {
+// eleven_multilingual_v2's documented language set. Checked explicitly
+// because this function is the end of the chain and would otherwise happily
+// synthesise anything handed to it: ElevenLabs returns 200 with
+// English-accented approximations for languages it does not support, which
+// is worse than no cloud audio at all — a 502 sends the client to a real
+// system voice for that language instead.
+//
+// This became load-bearing when Bulbul's Indian languages were added to
+// cloud-tts.ts's CLOUD_LANGS: with no SARVAM_API_KEY configured, Bengali
+// and the rest now reach this function, and must not be spoken by a model
+// that cannot pronounce them.
+const ELEVENLABS_LANGS = new Set([
+  'en', 'ja', 'zh', 'de', 'hi', 'fr', 'ko', 'pt', 'it', 'es',
+  'id', 'nl', 'tr', 'fil', 'tl', 'pl', 'sv', 'bg', 'ro', 'ar',
+  'cs', 'el', 'fi', 'hr', 'ms', 'sk', 'da', 'ta', 'uk', 'ru'
+])
+
+async function speakViaElevenLabs(text: string, lang: string): Promise<Response | null> {
+  if (!ELEVENLABS_LANGS.has(lang.toLowerCase().split('-')[0])) return null
+
   const apiKey = process.env.ELEVENLABS_API_KEY
   if (!apiKey) return null
 
@@ -117,11 +153,19 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const lang = body.lang ?? 'en'
 
-  // Groq first for the languages it covers (free, already fast/working);
-  // ElevenLabs for everything else. Either can return null (rather than
-  // throwing) on any failure, so this always tries the next option instead
-  // of giving up after the first provider that isn't available.
-  const response = (await speakViaGroq(text, lang)) ?? (await speakViaElevenLabs(text))
+  // Bulbul first for Indian languages: it covers 11 of them against the two
+  // (Hindi, Tamil) ElevenLabs' multilingual model offers, with real Indic
+  // prosody rather than an English voice approximating the sounds — and at
+  // roughly a tenth the price. Groq keeps English (free, already working),
+  // ElevenLabs keeps the European languages.
+  //
+  // Every provider returns null rather than throwing on failure, so this
+  // walks the chain instead of giving up on the first one that is
+  // unavailable — Sarvam not being configured is just the first null.
+  const response =
+    (await speakViaSarvam(text, lang)) ??
+    (await speakViaGroq(text, lang)) ??
+    (await speakViaElevenLabs(text, lang))
 
   if (!response) {
     // The client falls back to the browser voice on any non-200 here, so

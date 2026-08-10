@@ -9,8 +9,17 @@
 const CLOUD_TTS_MAX_CHARS = 4000
 
 // eleven_multilingual_v2's documented language set (ElevenLabs), plus 'en'
-// (Groq/Orpheus, no ElevenLabs quota spent) and 'ar' (both providers cover
-// it — Groq first, per the API route).
+// (Groq/Orpheus, no ElevenLabs quota spent), 'ar' (both providers cover
+// it — Groq first, per the API route), and Bulbul's Indian languages
+// (Sarvam — see lib/sarvam/speech.ts).
+//
+// The Indic entries are listed unconditionally even though Bulbul needs a
+// SARVAM_API_KEY the client cannot see. When the key is absent the speak
+// route returns 502 and fetchCloudSpeech falls back to the browser voice —
+// exactly where these languages ended up before, just after one wasted
+// round-trip. Gating this properly would mean duplicating a server secret's
+// presence into a NEXT_PUBLIC_ flag, which is a worse trade than one
+// request.
 const CLOUD_LANGS = new Set([
   'en',
   'ja',
@@ -41,7 +50,19 @@ const CLOUD_LANGS = new Set([
   'da',
   'ta',
   'uk',
-  'ru'
+  'ru',
+  // Bulbul (Sarvam). 'hi' and 'ta' are already above via ElevenLabs, but
+  // now resolve to Bulbul first in the speak route. 'od' is Sarvam's code
+  // for Odia, not ISO-639-1 'or' — see lib/sarvam/languages.ts.
+  'bn',
+  'gu',
+  'kn',
+  'ml',
+  'mr',
+  'od',
+  'or',
+  'pa',
+  'te'
 ])
 
 export function supportsCloudVoice(lang: string): boolean {

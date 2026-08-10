@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server'
 import { toFile } from 'openai'
 import { createClient } from '@/lib/supabase/server'
 import { getGroqClient } from '@/lib/groq/client'
+import { isSarvamConfigured } from '@/lib/sarvam/client'
+import { transcribeWithSaaras } from '@/lib/sarvam/speech'
 
 // Groq's hosted Whisper endpoint, not a local model: keeps setup free (same
 // GROQ_API_KEY already used for chat) and avoids a local whisper.cpp/ffmpeg
@@ -40,6 +42,33 @@ export async function POST(request: NextRequest): Promise<Response> {
   // accuracy rather than just picking a mediocre voice would.
   const languageParam = request.nextUrl.searchParams.get('language')
   const language = languageParam && /^[a-z]{2}$/.test(languageParam) ? languageParam : undefined
+
+  // Saaras first when configured. It is meaningfully better than Whisper on
+  // Indian languages and, critically, handles code-mixed Hinglish — the
+  // register most of urban India actually speaks, and the one Whisper is
+  // weakest on. It also returns the language it detected, which is strictly
+  // better evidence than this app's script-range guessing: script cannot
+  // tell Hindi from Marathi (both Devanagari), but Saaras can.
+  //
+  // India-first is a deliberate default here, not an accident: a user
+  // speaking a non-Indic, non-English language would be better served by
+  // Whisper, and reaches it only after a confident hint routes them there.
+  // If this app's audience ever stops being India-centred, invert this.
+  if (isSarvamConfigured()) {
+    const result = await transcribeWithSaaras(arrayBuffer, mimeType, language ?? null)
+
+    if (result) {
+      return Response.json({
+        text: result.text,
+        // Surfaced so the client can hold a hint grounded in the model's own
+        // detection rather than re-deriving one from the script of the text
+        // it just received.
+        languageCode: result.languageCode,
+        languageProbability: result.languageProbability
+      })
+    }
+    // Fell through: Sarvam unavailable or errored. Whisper below.
+  }
 
   try {
     const file = await toFile(arrayBuffer, 'audio.webm', { type: mimeType })

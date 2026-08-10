@@ -28,7 +28,34 @@ const SCRIPT_RANGES: { lang: string; pattern: RegExp }[] = [
   { lang: 'ko-KR', pattern: /[가-힯]/ },
   { lang: 'ar-SA', pattern: /[؀-ۿ]/ },
   { lang: 'ru-RU', pattern: /[Ѐ-ӿ]/ },
+  // Devanagari covers Hindi, Marathi, Nepali, Konkani, Sanskrit and
+  // Bhojpuri — script alone cannot tell them apart, so this necessarily
+  // resolves to Hindi. Saaras returns a real language_code per utterance
+  // (see api/voice/transcribe), which is the only way to distinguish them
+  // properly; this stays the no-API-key fallback.
   { lang: 'hi-IN', pattern: /[ऀ-ॿ]/ },
+  // The other major Indian scripts. Their absence was a real bug, not a
+  // gap in ambition: 'ta' was already in cloud-tts.ts's CLOUD_LANGS, so
+  // Tamil was advertised as supported while no rule could ever produce
+  // 'ta-IN' — every Tamil reply fell through to the browser's locale
+  // default and was read aloud by an English voice. The rest
+  // (Bengali/Telugu/Kannada/Malayalam/Gujarati/Punjabi/Odia) were
+  // unroutable for the same reason, between them several hundred million
+  // speakers.
+  //
+  // Unicode blocks are disjoint, so order among these does not matter —
+  // unlike the Japanese/Chinese pair above, which shares a block.
+  { lang: 'bn-IN', pattern: /[ঀ-৿]/ },
+  { lang: 'pa-IN', pattern: /[਀-੿]/ },
+  { lang: 'gu-IN', pattern: /[઀-૿]/ },
+  // Odia is 'od-IN' to Sarvam's APIs, not the ISO-639-1 'or' you would
+  // expect — see INDIC_TTS_LANGS in lib/sarvam/languages.ts, which maps
+  // it. Kept as 'od-IN' here so one code flows through unchanged.
+  { lang: 'od-IN', pattern: /[଀-୿]/ },
+  { lang: 'ta-IN', pattern: /[஀-௿]/ },
+  { lang: 'te-IN', pattern: /[ఀ-౿]/ },
+  { lang: 'kn-IN', pattern: /[ಀ-೿]/ },
+  { lang: 'ml-IN', pattern: /[ഀ-ൿ]/ },
   { lang: 'th-TH', pattern: /[฀-๿]/ },
   { lang: 'he-IL', pattern: /[֐-׿]/ },
   { lang: 'el-GR', pattern: /[Ͱ-Ͽ]/ }

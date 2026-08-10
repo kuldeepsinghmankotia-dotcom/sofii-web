@@ -125,6 +125,36 @@ describe('detectScriptLanguage', () => {
   it('matches on a single stray character - deliberately loose, see detectConfidentScriptLanguage', () => {
     expect(detectScriptLanguage('Hello, my friend ا')).toBe('ar-SA')
   })
+
+  // These languages were advertised or implied as supported while being
+  // unroutable: 'ta' was in cloud-tts.ts's CLOUD_LANGS with no Tamil rule
+  // here, so every Tamil reply fell through to an English voice. The rest
+  // had no rule either.
+  it('detects the major Indian scripts, not just Devanagari', () => {
+    expect(detectScriptLanguage('வணக்கம், எப்படி இருக்கிறீர்கள்?')).toBe('ta-IN')
+    expect(detectScriptLanguage('নমস্কার, কেমন আছেন?')).toBe('bn-IN')
+    expect(detectScriptLanguage('నమస్కారం, ఎలా ఉన్నారు?')).toBe('te-IN')
+    expect(detectScriptLanguage('ನಮಸ್ಕಾರ, ಹೇಗಿದ್ದೀರಿ?')).toBe('kn-IN')
+    expect(detectScriptLanguage('നമസ്കാരം, സുഖമാണോ?')).toBe('ml-IN')
+    expect(detectScriptLanguage('નમસ્તે, કેમ છો?')).toBe('gu-IN')
+    expect(detectScriptLanguage('ਸਤ ਸ੍ਰੀ ਅਕਾਲ, ਕਿਵੇਂ ਹੋ?')).toBe('pa-IN')
+    expect(detectScriptLanguage('ନମସ୍କାର, କେମିତି ଅଛନ୍ତି?')).toBe('od-IN')
+  })
+
+  it('keeps the Indian scripts disjoint from each other', () => {
+    // Each lives in its own Unicode block, so unlike Japanese/Chinese the
+    // ordering of these rules must not matter. A future edit that widened
+    // one range into another would surface here.
+    expect(detectScriptLanguage('வணக்கம்')).not.toBe('hi-IN')
+    expect(detectScriptLanguage('নমস্কার')).not.toBe('hi-IN')
+    expect(detectScriptLanguage('नमस्ते')).not.toBe('bn-IN')
+  })
+
+  it('still resolves every Devanagari language to Hindi, which script alone cannot disambiguate', () => {
+    // Marathi. Correct behaviour for a script-based detector, and precisely
+    // why Saaras's returned language_code is better evidence.
+    expect(detectScriptLanguage('नमस्कार, तुम्ही कसे आहात?')).toBe('hi-IN')
+  })
 })
 
 describe('detectConfidentScriptLanguage', () => {
