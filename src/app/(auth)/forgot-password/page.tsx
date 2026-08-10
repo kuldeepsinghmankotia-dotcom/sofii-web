@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { authErrorMessage } from '@/lib/auth/error-message'
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
@@ -27,7 +28,7 @@ export default function ForgotPasswordPage() {
     setLoading(false)
 
     if (error) {
-      setError(error.message)
+      setError(authErrorMessage(error.message))
       return
     }
 

@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { authErrorMessage } from '@/lib/auth/error-message'
 
 // Supabase's own default minimum. Enforced client-side too so the user
 // finds out before a round-trip, not after.
@@ -47,7 +48,7 @@ export default function UpdatePasswordPage() {
     setLoading(false)
 
     if (error) {
-      setError(error.message)
+      setError(authErrorMessage(error.message))
       return
     }
 
