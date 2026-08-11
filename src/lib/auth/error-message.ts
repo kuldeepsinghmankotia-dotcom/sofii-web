@@ -91,13 +91,18 @@ export function authError(error: { message?: string; status?: number; name?: str
   // message. Matching on text alone rendered that as a shrug — "Something
   // went wrong" — when the status already said plainly that it was a server
   // fault and not something the user could fix by retyping their address.
-  const hasMessage = Boolean(error?.message?.trim())
+  // "Usable", not "present". The message that actually arrives here is the
+  // string "{}" — non-empty, and completely meaningless. Treating presence
+  // as usefulness is what let a 500 with a known cause fall through to a
+  // shrug, and it is the same mistake in a new place: an empty body dressed
+  // up as a value is still an empty body.
+  const usable = isUsableMessage(error?.message)
 
   if (error?.status === 429) {
     return 'Too many attempts just now. Wait a minute and try again.'
   }
 
-  if (!hasMessage && error?.status) {
+  if (!usable && error?.status) {
     // 5xx is ours. Saying so stops someone re-checking an email address
     // that was never the problem.
     if (error.status >= 500) {
@@ -111,17 +116,26 @@ export function authError(error: { message?: string; status?: number; name?: str
   return authErrorMessage(error?.message)
 }
 
-export function authErrorMessage(raw: string | null | undefined): string {
-  if (!raw) return FALLBACK
-
+/**
+ * Whether a message says anything a reader could act on.
+ *
+ * The shape that started all of this is a message of literally "{}" — an
+ * empty response body serialised into the message field. Also covers "[]",
+ * "null", "undefined" and bare punctuation. All of them are present, and
+ * none of them are information, which is exactly the distinction that
+ * matters when deciding whether to fall back on the status code.
+ */
+export function isUsableMessage(raw: string | null | undefined): boolean {
+  if (!raw) return false
   const trimmed = raw.trim()
+  if (!trimmed) return false
+  return !/^(\{\s*\}|\[\s*\]|null|undefined|\W{0,3})$/i.test(trimmed)
+}
 
-  // The specific shape that started this: an empty or near-empty body
-  // serialised into the message. Also covers "{}", "[]", "null", "undefined"
-  // and bare punctuation, none of which mean anything to a reader.
-  if (!trimmed || /^(\{\s*\}|\[\s*\]|null|undefined|\W{0,3})$/i.test(trimmed)) {
-    return FALLBACK
-  }
+export function authErrorMessage(raw: string | null | undefined): string {
+  if (!isUsableMessage(raw)) return FALLBACK
+
+  const trimmed = (raw as string).trim()
 
   for (const { match, message } of KNOWN) {
     if (match.test(trimmed)) return message

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { authError, authErrorMessage } from './error-message'
+import { authError, authErrorMessage, isUsableMessage } from './error-message'
 
 describe('authErrorMessage', () => {
   it('never shows an empty object, the bug that prompted this', () => {
@@ -101,5 +101,39 @@ describe('authError falling back on status', () => {
 
   it('keeps the rate limit ahead of the generic 4xx branch', () => {
     expect(authError({ status: 429 })).toMatch(/wait a minute/i)
+  })
+})
+
+describe('the exact error supabase-js produces for a failed send', () => {
+  // Captured live from production:
+  //   { name: 'AuthRetryableFetchError', status: 500, message: '{}' }
+  // The message is present but meaningless, which is what let an earlier fix
+  // skip the status branch and fall through to a generic shrug.
+  const REAL = { name: 'AuthRetryableFetchError', status: 500, message: '{}' }
+
+  it('names it as our fault rather than shrugging', () => {
+    const shown = authError(REAL)
+    expect(shown).toMatch(/on our side/i)
+    expect(shown).not.toMatch(/something went wrong/i)
+  })
+
+  it('does not send the user to re-check an address that was fine', () => {
+    expect(authError(REAL)).toMatch(/not with your address/i)
+  })
+})
+
+describe('isUsableMessage', () => {
+  it('rejects values that are present but say nothing', () => {
+    expect(isUsableMessage('{}')).toBe(false)
+    expect(isUsableMessage('[]')).toBe(false)
+    expect(isUsableMessage('null')).toBe(false)
+    expect(isUsableMessage('   ')).toBe(false)
+    expect(isUsableMessage('')).toBe(false)
+    expect(isUsableMessage(null)).toBe(false)
+  })
+
+  it('accepts anything a reader could act on', () => {
+    expect(isUsableMessage('Invalid login credentials')).toBe(true)
+    expect(isUsableMessage('Error sending recovery email')).toBe(true)
   })
 })
