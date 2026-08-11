@@ -74,3 +74,32 @@ describe('authError', () => {
     expect(authError(null)).toMatch(/went wrong/i)
   })
 })
+
+describe('authError falling back on status', () => {
+  it('names a 500 as our fault, not the address', () => {
+    // The real observed failure: GoTrue reports "Error sending recovery
+    // email" under a `msg` field that supabase-js does not map onto
+    // AuthError.message, so this arrives as a 500 with nothing to match on.
+    // Matching text alone rendered it as "Something went wrong", sending the
+    // user to re-check an email address that was never the problem.
+    const shown = authError({ status: 500, message: '' })
+    expect(shown).toMatch(/on our side/i)
+    expect(shown).toMatch(/not with your address/i)
+  })
+
+  it('treats any 5xx the same way', () => {
+    expect(authError({ status: 503 })).toMatch(/on our side/i)
+  })
+
+  it('still prefers a real message over the status', () => {
+    expect(authError({ status: 500, message: 'Invalid login credentials' })).toMatch(/don't match/i)
+  })
+
+  it('points at the input for a 4xx rejection', () => {
+    expect(authError({ status: 422 })).toMatch(/check the email address/i)
+  })
+
+  it('keeps the rate limit ahead of the generic 4xx branch', () => {
+    expect(authError({ status: 429 })).toMatch(/wait a minute/i)
+  })
+})

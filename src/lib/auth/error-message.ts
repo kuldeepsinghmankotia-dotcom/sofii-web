@@ -83,10 +83,29 @@ export function authError(error: { message?: string; status?: number; name?: str
     })
   }
 
-  // A 429 often carries no body, so status is the only signal it was a rate
-  // limit rather than a genuine failure.
+  // Fall back on the status whenever there is no usable message.
+  //
+  // This is not a rare edge: GoTrue reports failures under a `msg` field,
+  // which supabase-js does not map onto AuthError.message, so a real
+  // "Error sending recovery email" reaches us as a 500 with an empty
+  // message. Matching on text alone rendered that as a shrug — "Something
+  // went wrong" — when the status already said plainly that it was a server
+  // fault and not something the user could fix by retyping their address.
+  const hasMessage = Boolean(error?.message?.trim())
+
   if (error?.status === 429) {
     return 'Too many attempts just now. Wait a minute and try again.'
+  }
+
+  if (!hasMessage && error?.status) {
+    // 5xx is ours. Saying so stops someone re-checking an email address
+    // that was never the problem.
+    if (error.status >= 500) {
+      return "We couldn't send that email — this is a problem on our side, not with your address."
+    }
+    if (error.status === 422 || error.status === 400) {
+      return 'That request was rejected. Check the email address and try again.'
+    }
   }
 
   return authErrorMessage(error?.message)
