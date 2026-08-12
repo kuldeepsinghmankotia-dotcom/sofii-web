@@ -11,12 +11,17 @@ import { withRateLimitRetry } from './retry'
 /**
  * Upper bound on plan length.
  *
- * Not a performance limit — a limit on how much a model may commit the user
- * to in one go. Past roughly this many steps a plan stops being a plan and
- * becomes a wish, with later steps written before anything is known about
- * what the earlier ones return.
+ * Both a judgement limit and a speed limit. Past roughly this many steps a
+ * plan stops being a plan and becomes a wish, with later steps written
+ * before anything is known about what the earlier ones return — and every
+ * step costs its own model round trip, so a six-step plan that could have
+ * been three simply takes twice as long to say the same thing.
+ *
+ * Lowered from 8 after watching real plans: research goals were being split
+ * into "define criteria", "search", "select", "gather details", "compare",
+ * "summarise" where three steps covered the same ground.
  */
-export const MAX_STEPS = 8
+export const MAX_STEPS = 5
 
 /** Below this, planning costs more than it saves. */
 export const MIN_STEPS = 2
@@ -42,7 +47,12 @@ Rules:
   calculation, a single reminder. Those should be answered directly.
 - Each step must be one concrete action, phrased as an instruction.
 - Steps run in order and can use earlier results.
-- Between ${MIN_STEPS} and ${MAX_STEPS} steps.
+- Between ${MIN_STEPS} and ${MAX_STEPS} steps — use the FEWEST that do the job.
+- Combine naturally related work into one step. "Search for X and note their
+  prices" is one step, not two. Do not add separate steps for deciding
+  criteria, selecting from results, or restating findings; the step that
+  gathers the information should also do the judging.
+- The final step should produce the answer the user asked for.
 
 Available capabilities: web search, reading a web page, exact calculation,
 searching the user's own documents and past conversations, saving notes,

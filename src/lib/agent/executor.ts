@@ -17,8 +17,27 @@ type Client = SupabaseClient<Database>
 // stops; whatever calls it again picks up exactly where it left off,
 // because the position lives in the database rather than in a variable.
 
-/** Tool rounds allowed within a single step. */
-const MAX_TOOL_ROUNDS_PER_STEP = 3
+/**
+ * Tool rounds allowed within a single step.
+ *
+ * Each round is a full model round trip, and on this model those dominate a
+ * step's runtime - a measured step produced only 627 characters yet took
+ * 318 seconds, with rate-limit backoff accounting for just 12 of them. The
+ * time is round trips, not tokens, so cutting the ceiling cuts the worst
+ * case directly. Two rounds still allow "call a tool, then answer using
+ * it", which is what almost every step actually needs.
+ */
+const MAX_TOOL_ROUNDS_PER_STEP = 2
+
+/**
+ * Ceiling on a step's own output.
+ *
+ * A step result is an intermediate note for the next step, not an essay,
+ * and generation time scales with length. Prior context is trimmed to 1200
+ * characters downstream anyway, so anything beyond this is written at cost
+ * and then discarded.
+ */
+const STEP_MAX_TOKENS = 900
 
 /**
  * How long one invocation may keep working.
@@ -43,6 +62,56 @@ export interface StepRow {
   title: string
   status: string
   result: string | null
+}
+
+/**
+ * How much of each earlier step's result to carry into the next one, and how
+ * much prior context to carry in total.
+ *
+ * Passing every earlier result in full made context grow quadratically: by
+ * step five, four complete research outputs travelled with every request.
+ * That is slow twice over — more tokens to send and to read — and it is the
+ * fastest way to exhaust a per-minute token budget, which is exactly what
+ * kept failing research tasks part-way through.
+ *
+ * The most recent steps are kept whole-ish and older ones trimmed, because
+ * a step almost always builds on what immediately preceded it. Nothing is
+ * dropped silently: a trimmed result says so, so the model knows it is
+ * seeing an excerpt rather than everything that was found.
+ */
+const PRIOR_RESULT_CHARS = 1200
+const PRIOR_CONTEXT_TOTAL_CHARS = 6000
+
+export function buildPriorContext(steps: StepRow[], currentIndex: number): string {
+  const earlier = steps
+    .filter((s) => s.step_index < currentIndex && s.result)
+    // Most recent first, so the closest work survives the budget.
+    .sort((a, b) => b.step_index - a.step_index)
+
+  const blocks: string[] = []
+  let used = 0
+
+  for (const s of earlier) {
+    const result = s.result as string
+    const trimmed =
+      result.length > PRIOR_RESULT_CHARS
+        ? `${result.slice(0, PRIOR_RESULT_CHARS)}\n[…trimmed]`
+        : result
+    const block = `Step ${s.step_index + 1} (${s.title}):\n${trimmed}`
+
+    if (used + block.length > PRIOR_CONTEXT_TOTAL_CHARS) {
+      // Out of budget. Say that older steps exist rather than letting the
+      // model assume this is the complete history.
+      blocks.push(`[…${earlier.length - blocks.length} earlier step(s) omitted for length]`)
+      break
+    }
+
+    blocks.push(block)
+    used += block.length
+  }
+
+  // Restore chronological order for reading.
+  return blocks.reverse().join('\n\n')
 }
 
 export interface ExecuteResult {
@@ -177,10 +246,7 @@ async function runStep(
 
   // Only completed steps carry context forward; a pending step has nothing
   // to say, and including its title would read as though it had run.
-  const priorContext = earlierSteps
-    .filter((s) => s.step_index < step.step_index && s.result)
-    .map((s) => `Step ${s.step_index + 1} (${s.title}):\n${s.result}`)
-    .join('\n\n')
+  const priorContext = buildPriorContext(earlierSteps, step.step_index)
 
   const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: STEP_PROMPT },
@@ -203,13 +269,42 @@ async function runStep(
     for (let round = 0; round <= MAX_TOOL_ROUNDS_PER_STEP; round++) {
       const isFinal = round === MAX_TOOL_ROUNDS_PER_STEP
 
-      const completion = await withRateLimitRetry(() =>
-        groq.chat.completions.create({
-          model: 'openai/gpt-oss-120b',
-          messages,
-          ...(isFinal ? {} : { tools: TOOL_DEFINITIONS, tool_choice: 'auto' as const })
+      // Withdrawing the tools on the final round is not enough on its own.
+      // Groq rejects the whole request with "Tool choice is none, but model
+      // called a tool" if the model reaches for one anyway — a hard 400 that
+      // fails the step rather than degrading. Lowering the round ceiling made
+      // this land far more often, because the tool-free round now arrives
+      // while the model still wants to search. So it is told, not just
+      // starved.
+      if (isFinal) {
+        messages.push({
+          role: 'user',
+          content:
+            'You have no tools left for this step. Answer now using only what you already found above. If it is incomplete, say what you have and what is missing.'
         })
-      )
+      }
+
+      let completion
+      try {
+        completion = await withRateLimitRetry(() =>
+          groq.chat.completions.create({
+            model: 'openai/gpt-oss-120b',
+            messages,
+            max_tokens: STEP_MAX_TOKENS,
+            ...(isFinal ? {} : { tools: TOOL_DEFINITIONS, tool_choice: 'auto' as const })
+          })
+        )
+      } catch (error) {
+        // If the model insisted on a tool after they were withdrawn, and an
+        // earlier round already produced something, keep that rather than
+        // throwing away a step's real work over its closing sentence.
+        const message = error instanceof Error ? error.message : String(error)
+        if (isFinal && result.trim() && /tool choice is none/i.test(message)) {
+          console.warn('Final round wanted a tool; keeping the result already gathered.')
+          break
+        }
+        throw error
+      }
 
       const choice = completion.choices[0]?.message
       if (!choice) break
@@ -296,7 +391,11 @@ async function summarise(supabase: Client, taskId: string, goal: string): Promis
             'Answer the original goal using the findings below. Write the answer itself, not a description of the process. Be concrete and brief. If the findings do not actually answer the goal, say so.'
         },
         { role: 'user', content: `Goal: ${goal}\n\nFindings:\n${transcript}` }
-      ]
+      ],
+      // The summary is one more round trip on a slow model; the answer to a
+      // research question does not need to be long, and length here is paid
+      // for in latency the user is waiting on.
+      max_tokens: 1200
     })
 
     return completion.choices[0]?.message?.content?.trim() || transcript
