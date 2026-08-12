@@ -481,6 +481,12 @@ export default function Sidebar({
         </nav>
 
         <div className="shrink-0 border-t border-[var(--border)] px-2 py-2">
+          {/* Labelled like the date groups above it. Without a heading this
+              reads as a continuation of the conversation list rather than a
+              separate set of tools, which is what it is. */}
+          <h2 className="px-2 pt-1 pb-1 text-xs font-medium tracking-wide text-[var(--text-muted)] uppercase">
+            Tools
+          </h2>
           {(isAdmin ? [...SECONDARY_LINKS, ...ADMIN_LINKS] : SECONDARY_LINKS).map((link) => (
             <Link
               key={link.href}

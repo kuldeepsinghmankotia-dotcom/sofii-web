@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Loader2, Upload, X } from 'lucide-react'
+import { AlertTriangle, FileText, Loader2, Upload, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { deleteDocument, type DocumentSummary } from '@/lib/db/documents'
 import { Tooltip } from '../tooltip'
+import { EmptyState } from '../empty-state'
 
 type IngestingJobStatus = 'pending' | 'processing' | 'failed'
 
@@ -185,7 +186,7 @@ export default function DocumentList({
       } else if (INGEST_EXTENSIONS.has(extension)) {
         if (!serviceOnline) {
           throw new Error(
-            'Document tools are temporarily offline, so this file type can\'t be processed right now — only PDF uploads work at the moment.'
+            'That file type needs the document service, which is temporarily offline. PDFs and photos still work.'
           )
         }
         await uploadViaIngest(file)
@@ -293,7 +294,12 @@ export default function DocumentList({
         ))}
 
         {documents.length === 0 && jobs.length === 0 && (
-          <p className="text-[var(--text-muted)]">No documents uploaded yet.</p>
+          <EmptyState
+            icon={FileText}
+            title="No documents yet"
+            description="Upload a PDF, a spreadsheet, or a photo of a bill or handwritten note — Sofii reads it and can answer questions about it in chat."
+            examples={['A bank statement', 'A photo of a receipt', 'Meeting notes']}
+          />
         )}
         {documents.map((doc) => (
           <div

@@ -10,7 +10,11 @@ export default async function RemindersPage() {
 
   return (
     <div className="mx-auto max-w-2xl p-4 sm:p-6">
-      <PageHeader icon={Bell} title="Reminders" />
+      <PageHeader
+        icon={Bell}
+        title="Reminders"
+        description="Sofii nudges you at the right time. Add one here, or just ask in chat and it will set it for you."
+      />
       <ReminderList initialReminders={reminders} />
     </div>
   )

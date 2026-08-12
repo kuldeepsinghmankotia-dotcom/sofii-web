@@ -28,9 +28,13 @@ export default async function DocumentsPage() {
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-400">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
           <div>
-            <strong>Document tools are temporarily offline.</strong> New uploads (other than PDF), OCR, and
-            &quot;Ask about your documents&quot; won&apos;t work right now — your existing documents and chat
-            are unaffected. Try again in a bit.
+            {/* OCR moved in-app with Sarvam Vision, so photos and scans no
+                longer depend on this service. Saying otherwise would send
+                someone away from something that works. */}
+            <strong>Some document tools are temporarily offline.</strong> Office files (.docx, .xlsx,
+            .pptx, .csv) and web-page links can&apos;t be processed right now, and &quot;Ask about your
+            documents&quot; is unavailable. <strong>PDFs and photos still work</strong>, and your
+            existing documents and chat are unaffected.
           </div>
         </div>
       )}

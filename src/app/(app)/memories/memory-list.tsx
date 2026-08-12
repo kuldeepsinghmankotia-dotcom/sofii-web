@@ -5,6 +5,7 @@ import { FileText, Sparkles, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { createMemory, deleteMemory, updateMemory, type Memory } from '@/lib/db/memories'
 import { Tooltip } from '../tooltip'
+import { EmptyState } from '../empty-state'
 
 const STALE_UNUSED_DAYS = 14
 const STALE_SINCE_LAST_USE_DAYS = 30
@@ -102,7 +103,13 @@ export default function MemoryList({ initialMemories }: { initialMemories: Memor
 
       <div className="space-y-2">
         {memories.length === 0 && (
-          <p className="text-[var(--text-muted)]">Nothing remembered yet.</p>
+          <EmptyState
+            icon={Sparkles}
+            title="Nothing remembered yet"
+            description="Sofii picks these up from your conversations on its own — or add one here and it will be used from your very next message."
+            examples={['I prefer concise answers', 'I am vegetarian', 'I work in Bengaluru']}
+            onExampleClick={setInput}
+          />
         )}
         {memories.map((memory) => (
           <div

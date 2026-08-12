@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { Bell, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
   cancelReminder,
@@ -11,6 +11,7 @@ import {
   type ReminderStatus
 } from '@/lib/db/reminders'
 import { Tooltip } from '../tooltip'
+import { EmptyState } from '../empty-state'
 
 function toLocalDatetimeInputValue(date: Date): string {
   const pad = (n: number): string => String(n).padStart(2, '0')
@@ -94,7 +95,15 @@ export default function ReminderList({ initialReminders }: { initialReminders: R
       </div>
 
       <div className="space-y-2">
-        {reminders.length === 0 && <p className="text-[var(--text-muted)]">No reminders yet.</p>}
+        {reminders.length === 0 && (
+          <EmptyState
+            icon={Bell}
+            title="No reminders yet"
+            description="Set one here, or just say it in chat — “remind me to call the bank at 5” works."
+            examples={['Pay rent on the 1st', 'Call Mum on Sunday', 'Renew insurance next month']}
+            onExampleClick={setContent}
+          />
+        )}
         {reminders.map((reminder) => (
           <div
             key={reminder.id}

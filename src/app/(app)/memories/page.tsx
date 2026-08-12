@@ -10,7 +10,11 @@ export default async function MemoriesPage() {
 
   return (
     <div className="mx-auto max-w-2xl p-4 sm:p-6">
-      <PageHeader icon={Sparkles} title="Memories" />
+      <PageHeader
+        icon={Sparkles}
+        title="Memories"
+        description="Facts Sofii keeps about you across every conversation — picked up automatically, and editable here."
+      />
       <MemoryList initialMemories={memories} />
     </div>
   )
