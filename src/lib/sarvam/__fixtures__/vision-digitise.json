@@ -1,0 +1,118 @@
+{
+  "job_id": "019ff77a-e4dc-7bf8-8d1b-5f2717937a34",
+  "type": "digitise",
+  "status": "completed",
+  "usage": {
+    "pages_total": 1,
+    "pages_processed": 1,
+    "pages_succeeded": 1,
+    "pages_failed": 0,
+    "pages_discarded": 0
+  },
+  "documents": [
+    {
+      "filename": "invoice.png",
+      "page_count": 1,
+      "status": "completed",
+      "pages": [
+        {
+          "page_num": 1,
+          "image_width": 900,
+          "image_height": 380,
+          "blocks": [
+            {
+              "block_id": "p1-b1",
+              "text": "Invoice / बिल",
+              "layout_tag": "paragraph",
+              "reading_order": 1,
+              "coordinates": {
+                "x1": 39,
+                "y1": 52,
+                "x2": 265,
+                "y2": 95
+              },
+              "bbox_norm": [
+                0.043333333333333335,
+                0.1368421052631579,
+                0.29444444444444445,
+                0.25
+              ]
+            },
+            {
+              "block_id": "p1-b2",
+              "text": "बिल",
+              "layout_tag": "image",
+              "reading_order": 2,
+              "coordinates": {
+                "x1": 199,
+                "y1": 51,
+                "x2": 264,
+                "y2": 93
+              },
+              "bbox_norm": [
+                0.22111111111111112,
+                0.13421052631578947,
+                0.29333333333333333,
+                0.24473684210526317
+              ]
+            },
+            {
+              "block_id": "p1-b3",
+              "text": "Name: Abhinav Rana",
+              "layout_tag": "paragraph",
+              "reading_order": 3,
+              "coordinates": {
+                "x1": 37,
+                "y1": 134,
+                "x2": 345,
+                "y2": 165
+              },
+              "bbox_norm": [
+                0.04111111111111111,
+                0.3526315789473684,
+                0.38333333333333336,
+                0.4342105263157895
+              ]
+            },
+            {
+              "block_id": "p1-b4",
+              "text": "राशि: 4,250 रुपये",
+              "layout_tag": "paragraph",
+              "reading_order": 4,
+              "coordinates": {
+                "x1": 36,
+                "y1": 188,
+                "x2": 260,
+                "y2": 226
+              },
+              "bbox_norm": [
+                0.04,
+                0.49473684210526314,
+                0.28888888888888886,
+                0.5947368421052631
+              ]
+            },
+            {
+              "block_id": "p1-b5",
+              "text": "Date: 22 August 2026",
+              "layout_tag": "paragraph",
+              "reading_order": 5,
+              "coordinates": {
+                "x1": 37,
+                "y1": 253,
+                "x2": 350,
+                "y2": 288
+              },
+              "bbox_norm": [
+                0.04111111111111111,
+                0.6657894736842105,
+                0.3888888888888889,
+                0.7578947368421053
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

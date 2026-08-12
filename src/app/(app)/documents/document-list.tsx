@@ -20,6 +20,9 @@ type IngestedDocument = DocumentSummary & { flaggedForReview?: boolean }
 // Anything that isn't a PDF and isn't rejected client-side goes through
 // /api/ingest (the Python pipeline) — server-side validation there is the
 // real gate, this set only decides which upload path the browser takes.
+// Read in-app by Sarvam Vision, so they need nothing else running.
+const DIRECT_OCR_EXTENSIONS = new Set(['png', 'jpg', 'jpeg'])
+
 const INGEST_EXTENSIONS = new Set([
   'txt',
   'md',
@@ -172,7 +175,12 @@ export default function DocumentList({
 
     try {
       const extension = extensionOf(file.name)
-      if (file.type === 'application/pdf' || extension === 'pdf') {
+      // Photos and PDFs both go straight to the app's own upload route,
+      // which reads them with Sarvam Vision. Images used to be routed to the
+      // Mac-hosted service, which meant a photo of a bill or a handwritten
+      // note — the most common thing an Indian user has to hand — only
+      // worked while that machine was awake.
+      if (file.type === 'application/pdf' || extension === 'pdf' || DIRECT_OCR_EXTENSIONS.has(extension)) {
         await uploadPdf(file)
       } else if (INGEST_EXTENSIONS.has(extension)) {
         if (!serviceOnline) {
