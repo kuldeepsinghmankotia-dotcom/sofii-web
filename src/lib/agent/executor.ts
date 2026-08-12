@@ -5,6 +5,7 @@ import { getGroqClient } from '@/lib/groq/client'
 import { TOOL_DEFINITIONS } from '@/lib/tools/definitions'
 import { executeToolCall } from '@/lib/tools/execute'
 import { isRateLimit, withRateLimitRetry } from './retry'
+import { AGENT_MODEL } from './model'
 
 type Client = SupabaseClient<Database>
 
@@ -288,7 +289,7 @@ async function runStep(
       try {
         completion = await withRateLimitRetry(() =>
           groq.chat.completions.create({
-            model: 'openai/gpt-oss-120b',
+            model: AGENT_MODEL,
             messages,
             max_tokens: STEP_MAX_TOKENS,
             ...(isFinal ? {} : { tools: TOOL_DEFINITIONS, tool_choice: 'auto' as const })
@@ -383,7 +384,7 @@ async function summarise(supabase: Client, taskId: string, goal: string): Promis
 
   try {
     const completion = await getGroqClient().chat.completions.create({
-      model: 'openai/gpt-oss-120b',
+      model: AGENT_MODEL,
       messages: [
         {
           role: 'system',

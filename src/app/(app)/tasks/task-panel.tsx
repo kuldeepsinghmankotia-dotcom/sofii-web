@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Check, ChevronDown, CircleDashed, Loader2, RotateCcw, TriangleAlert, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { AssistantContent } from '../c/[conversationId]/message-content'
 
 // Watching a task run.
 //
@@ -19,6 +20,35 @@ export interface TaskStep {
   status: 'pending' | 'running' | 'done' | 'failed' | 'skipped'
   result: string | null
   error_message: string | null
+  started_at?: string | null
+}
+
+/**
+ * A ticking count of how long the current step has been working.
+ *
+ * The panel polls every 3s and always did — but a single research step runs
+ * for one to five minutes, so nothing on screen changed for minutes at a
+ * time and the whole thing read as frozen. People refreshed to find out
+ * whether it was still alive. Nothing was wrong with the data; there was
+ * simply no evidence of life.
+ *
+ * A number that moves every second is that evidence, and it costs one
+ * timer rather than more requests.
+ */
+function useElapsed(since: string | null | undefined, active: boolean): string | null {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!active || !since) return
+    const timer = setInterval(() => queueMicrotask(() => setNow(Date.now())), 1000)
+    return () => clearInterval(timer)
+  }, [active, since])
+
+  if (!since || !active) return null
+
+  const seconds = Math.max(0, Math.floor((now - new Date(since).getTime()) / 1000))
+  if (seconds < 60) return `${seconds}s`
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`
 }
 
 export interface AgentTask {
@@ -37,6 +67,17 @@ const POLL_INTERVAL_MS = 3000
 
 function isFinished(status: AgentTask['status']): boolean {
   return status === 'done' || status === 'failed' || status === 'cancelled'
+}
+
+/** Ticking elapsed time for the step currently running. */
+function StepClock({ startedAt }: { startedAt?: string | null }) {
+  const elapsed = useElapsed(startedAt, true)
+  if (!elapsed) return null
+  return (
+    <span className="ml-2 rounded-md bg-[var(--bg-elevated)] px-1.5 py-0.5 align-middle text-[11px] tabular-nums text-[var(--text-muted)]">
+      {elapsed}
+    </span>
+  )
 }
 
 export default function TaskPanel({ task: initialTask }: { task: AgentTask }) {
@@ -117,11 +158,26 @@ export default function TaskPanel({ task: initialTask }: { task: AgentTask }) {
       <div className="mb-3 flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-[var(--text)]">{task.goal}</p>
-          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+            {running && (
+              // A pulse is the cheapest possible proof the panel is live.
+              // Research steps run for minutes, so without it the whole card
+              // sits unchanged long enough to look broken.
+              <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
+                <span
+                  className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+                  style={{ background: 'var(--accent-a)' }}
+                />
+                <span
+                  className="relative inline-flex h-1.5 w-1.5 rounded-full"
+                  style={{ background: 'var(--accent-a)' }}
+                />
+              </span>
+            )}
             {task.status === 'done' && `Finished · ${steps.length} steps`}
             {task.status === 'failed' && 'Failed'}
             {task.status === 'cancelled' && 'Cancelled'}
-            {running && steps.length > 0 && `Step ${Math.min(doneCount + 1, steps.length)} of ${steps.length}`}
+            {running && steps.length > 0 && `Working · step ${Math.min(doneCount + 1, steps.length)} of ${steps.length}`}
             {running && steps.length === 0 && 'Planning…'}
           </p>
         </div>
@@ -170,6 +226,9 @@ export default function TaskPanel({ task: initialTask }: { task: AgentTask }) {
                   }`}
                 >
                   {step.title}
+                  {step.status === 'running' && (
+                    <StepClock startedAt={step.started_at} />
+                  )}
                 </span>
 
                 {hasDetail && (
@@ -192,13 +251,13 @@ export default function TaskPanel({ task: initialTask }: { task: AgentTask }) {
                     transition={{ duration: 0.16, ease: 'easeOut' }}
                     className="overflow-hidden"
                   >
-                    <p
-                      className={`mx-2 mb-2 rounded-lg bg-[var(--bg-elevated)] p-3 text-xs leading-relaxed whitespace-pre-wrap ${
-                        step.error_message ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]'
-                      }`}
-                    >
-                      {step.error_message ?? step.result}
-                    </p>
+                    <div className="mx-2 mb-2 rounded-lg bg-[var(--bg-elevated)] p-3 text-xs leading-relaxed">
+                      {step.error_message ? (
+                        <p className="text-[var(--danger)]">{step.error_message}</p>
+                      ) : (
+                        <AssistantContent content={step.result ?? ''} />
+                      )}
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -209,10 +268,14 @@ export default function TaskPanel({ task: initialTask }: { task: AgentTask }) {
 
       {task.summary && (
         <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-          <p className="mb-1 text-xs font-medium text-[var(--text)]">Answer</p>
-          <p className="text-sm leading-relaxed whitespace-pre-wrap text-[var(--text-muted)]">
-            {task.summary}
-          </p>
+          <p className="mb-1.5 text-xs font-medium text-[var(--text)]">Answer</p>
+          {/* Rendered, not raw. The answer is the point of the task, and
+              research output is full of tables and lists — showing it as
+              literal pipes and dashes wasted the work that produced it.
+              Reuses the same renderer as chat so formatting is identical. */}
+          <div className="text-sm">
+            <AssistantContent content={task.summary} />
+          </div>
         </div>
       )}
 

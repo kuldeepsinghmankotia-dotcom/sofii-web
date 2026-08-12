@@ -36,7 +36,7 @@ export async function GET(
       .maybeSingle(),
     supabase
       .from('agent_steps')
-      .select('step_index, title, status, result, error_message')
+      .select('step_index, title, status, result, error_message, started_at')
       .eq('task_id', taskId)
       .order('step_index', { ascending: true })
   ])

@@ -1,5 +1,6 @@
 import { getGroqClient } from '@/lib/groq/client'
 import { withRateLimitRetry } from './retry'
+import { PLANNER_MODEL } from './model'
 
 // Turning a goal into a plan.
 //
@@ -126,7 +127,7 @@ export function parsePlan(raw: string): Plan {
 }
 
 /** Ask the model for a plan. */
-export async function planTask(goal: string, model = 'openai/gpt-oss-120b'): Promise<Plan> {
+export async function planTask(goal: string, model = PLANNER_MODEL): Promise<Plan> {
   try {
     // Retried on rate limits like every other model call here: a 429
     // during planning surfaced as a bare "Planning failed", which reads to
