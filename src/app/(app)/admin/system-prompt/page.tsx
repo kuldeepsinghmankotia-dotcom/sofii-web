@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { Sparkles } from 'lucide-react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getCurrentUser } from '@/lib/supabase/server'
 import { getOwnRole } from '@/lib/db/profiles'
 import { getActiveSystemPrompt } from '@/lib/db/system-prompt'
 import { PageHeader } from '../../page-header'
@@ -12,9 +12,7 @@ import SystemPromptForm from './system-prompt-form'
 // nicety, not the actual security boundary.
 export default async function SystemPromptAdminPage() {
   const supabase = await createClient()
-  const {
-    data: { user }
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
   if (!user) redirect('/sign-in')
 
   const role = await getOwnRole(supabase, user.id)

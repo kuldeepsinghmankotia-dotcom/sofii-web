@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { Bug, HelpCircle, Lightbulb, MessageSquarePlus } from 'lucide-react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getCurrentUser } from '@/lib/supabase/server'
 import { getOwnRole } from '@/lib/db/profiles'
 import { PageHeader } from '../../page-header'
 
@@ -26,10 +26,7 @@ interface FeedbackRow {
 // ignored.
 export default async function AdminFeedbackPage() {
   const supabase = await createClient()
-
-  const {
-    data: { user }
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
   if (!user) redirect('/sign-in')
 
   // Checked server-side rather than relying on the row-level policy alone:

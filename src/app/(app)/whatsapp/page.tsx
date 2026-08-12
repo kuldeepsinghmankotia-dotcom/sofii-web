@@ -1,15 +1,12 @@
 import { MessageCircle } from 'lucide-react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getCurrentUser } from '@/lib/supabase/server'
 import { isWhatsAppConfigured } from '@/lib/whatsapp/client'
 import { PageHeader } from '../page-header'
 import WhatsAppLink from './whatsapp-link'
 
 export default async function WhatsAppPage() {
   const supabase = await createClient()
-
-  const {
-    data: { user }
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
 
   // RLS restricts this to the caller's own links, so no explicit filter is
   // needed — this is a session-scoped client, unlike the webhook's.

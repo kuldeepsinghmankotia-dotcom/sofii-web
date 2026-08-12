@@ -1,5 +1,5 @@
 import { AlertTriangle, FileText } from 'lucide-react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getCurrentUser } from '@/lib/supabase/server'
 import { listDocuments } from '@/lib/db/documents'
 import { markStuckIngestionJobsFailed } from '@/lib/db/ingestion-jobs'
 import { isIngestServiceOnline } from '@/lib/ingestion/health'
@@ -9,10 +9,7 @@ import AskDocuments from './ask-documents'
 
 export default async function DocumentsPage() {
   const supabase = await createClient()
-
-  const {
-    data: { user }
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
 
   // Lazy cleanup (no cron slot available - see markStuckIngestionJobsFailed's
   // own comment): runs once per page load, not user-visible in itself.

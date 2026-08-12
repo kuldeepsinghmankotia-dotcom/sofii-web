@@ -1,5 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { cache } from 'react'
+import type { User } from '@supabase/supabase-js'
 import type { Database } from '@/types/database'
 
 // Request-scoped: carries the calling user's session, so every query made
@@ -32,3 +34,29 @@ export async function createClient() {
     }
   )
 }
+
+/**
+ * The signed-in user, fetched at most once per request.
+ *
+ * getUser() is not a local token decode — it is a network call to Supabase
+ * Auth to validate the JWT, and every caller pays for it. A single
+ * authenticated page render was making three of them: one in middleware, one
+ * in the layout, and one in the page, all sequential, all asking the same
+ * question. From India that is roughly a second of latency before anything
+ * renders, which is precisely the "slow to log in" complaint.
+ *
+ * React's cache() dedupes within a single request, so the layout and the
+ * page now share one call. Middleware runs in a separate invocation and
+ * cannot share it, but its call is doing real work — refreshing the session
+ * cookie — rather than merely re-asking.
+ *
+ * Safe to call anywhere on the server: it returns the same object every time
+ * within one request, and is never shared across requests.
+ */
+export const getCurrentUser = cache(async (): Promise<User | null> => {
+  const supabase = await createClient()
+  const {
+    data: { user }
+  } = await supabase.auth.getUser()
+  return user
+})

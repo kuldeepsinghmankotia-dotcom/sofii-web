@@ -1,5 +1,5 @@
 import { after } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getCurrentUser } from '@/lib/supabase/server'
 import { getCatchUp, shouldShowCatchUp, touchLastActive } from '@/lib/db/catch-up'
 import { CatchUpPanel } from './catch-up-panel'
 import HomeComposer from './home-composer'
@@ -17,10 +17,7 @@ import HomeComposer from './home-composer'
 // page rather than flashing in after a client fetch.
 export default async function HomePage() {
   const supabase = await createClient()
-
-  const {
-    data: { user }
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
 
   let catchUp = null
   if (user) {
