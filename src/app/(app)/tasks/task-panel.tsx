@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { Check, ChevronDown, CircleDashed, Loader2, TriangleAlert, X } from 'lucide-react'
+import { Check, ChevronDown, CircleDashed, Loader2, RotateCcw, TriangleAlert, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 // Watching a task run.
@@ -43,6 +43,7 @@ export default function TaskPanel({ task: initialTask }: { task: AgentTask }) {
   const [task, setTask] = useState(initialTask)
   const [steps, setSteps] = useState<TaskStep[]>([])
   const [expanded, setExpanded] = useState<number | null>(null)
+  const [retrying, setRetrying] = useState(false)
   const reducedMotion = useReducedMotion()
   // Held in a ref so the polling effect does not restart every tick.
   const finishedRef = useRef(isFinished(initialTask.status))
@@ -78,6 +79,23 @@ export default function TaskPanel({ task: initialTask }: { task: AgentTask }) {
 
     return () => clearInterval(timer)
   }, [poll])
+
+  const retry = async (): Promise<void> => {
+    setRetrying(true)
+    try {
+      const response = await fetch(`/api/agent/tasks/${task.id}/retry`, { method: 'POST' })
+      if (!response.ok) throw new Error(await response.text())
+      // Reflect the change immediately, and restart polling — finishedRef
+      // is what stopped the timer when the task failed.
+      finishedRef.current = false
+      setTask((prev) => ({ ...prev, status: 'running', error_message: null }))
+      void poll()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not retry')
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   const cancel = async (): Promise<void> => {
     const response = await fetch(`/api/agent/tasks/${task.id}`, { method: 'DELETE' })
@@ -199,9 +217,22 @@ export default function TaskPanel({ task: initialTask }: { task: AgentTask }) {
       )}
 
       {task.error_message && (
-        <p className="mt-3 rounded-xl border border-[var(--danger)]/30 bg-red-500/5 p-3 text-sm text-[var(--danger)]">
-          {task.error_message}
-        </p>
+        <div className="mt-3 rounded-xl border border-[var(--danger)]/30 bg-red-500/5 p-3">
+          <p className="text-sm text-[var(--danger)]">{task.error_message}</p>
+          {/* A failed task was previously a dead end — the plan and every
+              completed step were still there with no way to pick them back
+              up. That is a poor outcome for the most common failure, a rate
+              limit, which clears in under a minute. Retrying keeps finished
+              steps and re-runs only what did not complete. */}
+          <button
+            onClick={() => void retry()}
+            disabled={retrying}
+            className="mt-2.5 flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-1.5 text-xs font-medium text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-60"
+          >
+            {retrying ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
+            {retrying ? 'Resuming…' : 'Try again'}
+          </button>
+        </div>
       )}
     </div>
   )

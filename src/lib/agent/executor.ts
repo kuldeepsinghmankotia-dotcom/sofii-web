@@ -102,13 +102,24 @@ export async function advanceTask(
 
     // Re-read the task's status between steps so a cancellation from the UI
     // takes effect promptly instead of after the whole plan.
+    //
+    // This write is also a heartbeat, and that part is load-bearing. Stall
+    // detection asks when the task was last touched, but a running step only
+    // updates *step* rows — so a genuinely busy task looked abandoned after
+    // 60s and picked up a second runner. Two invocations then worked the
+    // same plan at once, doubling the model spend and tripping the rate
+    // limit that failed this task twice over.
     const { data: current } = await supabase
       .from('agent_tasks')
-      .select('status')
+      .update({ status: 'running' })
       .eq('id', taskId)
+      .in('status', ['running', 'planning'])
+      .select('status')
       .maybeSingle()
 
-    if (current?.status === 'cancelled') {
+    // No row came back: something else finished, failed or cancelled this
+    // task while we were working. Stop rather than press on.
+    if (!current) {
       return { status: 'failed', completedSteps: completed }
     }
 
