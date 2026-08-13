@@ -61,25 +61,13 @@ import { notifyConversationsChanged } from '../../sidebar'
 import { Tooltip } from '../../tooltip'
 import { ModelPicker, useSelectedModel, MODEL_INFO, type ModelChoice } from '../../model-picker'
 import type { ChatMessage } from '@/lib/db/messages'
+import { containsWakeWord, newTranscript } from '@/lib/voice/wake-word'
 
 type Props = {
   conversationId: string
   title: string
   initialShareToken: string | null
   initialMessages: ChatMessage[]
-}
-
-// Checked as a plain substring match against the browser's own speech
-// recognition transcript — "Sofii" is an uncommon name that generic speech
-// models often mishear, so a few likely-sounding variants are included
-// rather than requiring an exact match. This is a real accuracy trade-off,
-// not a bug: false negatives (said it, didn't trigger) are more likely than
-// false positives at this stage.
-const WAKE_PHRASES = ['sofii', 'sofi', 'sophie', 'sophia', 'sofia']
-
-function containsWakeWord(transcript: string): boolean {
-  const lower = transcript.toLowerCase()
-  return WAKE_PHRASES.some((phrase) => lower.includes(phrase))
 }
 
 // Locale pinned to 'en-US' (rather than the runtime default) so formatting
@@ -1078,9 +1066,9 @@ export default function ChatWindow({
       let heard = false
 
       recognition.onresult = (event) => {
-        const transcript = Array.from(event.results)
-          .map((r) => r[0].transcript)
-          .join(' ')
+        // Only what was just heard — see newTranscript. Reading the whole
+        // cumulative list made one mishearing retrigger forever.
+        const transcript = newTranscript(event)
         if (containsWakeWord(transcript)) {
           heard = true
           recognition.stop()
