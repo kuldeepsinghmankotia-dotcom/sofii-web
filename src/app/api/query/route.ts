@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { appendQueryExchange, getQueryHistory } from '@/lib/redis/query-history'
 import { getQueryRatelimit } from '@/lib/redis/ratelimit'
+import { answerFromDocuments } from '@/lib/documents/answer'
 
 interface QueryRequestBody {
   query?: string
@@ -10,17 +11,18 @@ interface QueryRequestBody {
   threadId?: string
 }
 
-// Authenticated proxy to the Python query-agent's /query endpoint — same
-// shared-secret pattern as /api/ingest. document_ids ownership is enforced
-// on the Python side (every document_chunks read there is filtered by
-// both document_id AND user_id), so a stray ID from another user just
-// yields "doesn't belong to you" rather than needing a second check here.
+// "Ask about your documents".
 //
-// threadId is client-generated and opaque to us — it only namespaces the
-// Redis-backed short-term history (see lib/redis/query-history.ts) for this
-// stateless workflow, the same "retain the last 5-10 exchanges" behavior
-// the main chat now has, applied here since this agentic flow has no
-// conversationId of its own to key off.
+// Previously a proxy to the Python query agent on the developer's Mac, which
+// meant this returned "Query service unreachable" whenever that machine was
+// asleep — a visibly broken button rather than an absent feature. It now
+// runs entirely in this app, using the same embeddings, the same hybrid
+// search and the same model the chat route uses, so an answer here matches
+// an answer there.
+//
+// threadId stays client-generated and opaque: it only namespaces the
+// Redis-backed short-term history, since this flow has no conversationId of
+// its own to key off.
 export async function POST(request: NextRequest): Promise<Response> {
   const supabase = await createClient()
 
@@ -40,7 +42,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     })
   }
 
-  const body = (await request.json()) as QueryRequestBody
+  const body = (await request.json().catch(() => ({}))) as QueryRequestBody
   const query = body.query?.trim()
 
   if (!query) {
@@ -48,54 +50,26 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   const threadId = body.threadId ?? randomUUID()
+  const history = await getQueryHistory(threadId).catch(() => [])
 
-  const serviceUrl = process.env.INGEST_SERVICE_URL
-  const serviceSecret = process.env.INGEST_SERVICE_SECRET
-
-  if (!serviceUrl || !serviceSecret) {
-    return new Response('Query service is not configured', { status: 503 })
-  }
-
-  const history = await getQueryHistory(threadId)
-
-  let upstream: Response
-  try {
-    upstream = await fetch(`${serviceUrl}/query`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${serviceSecret}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query,
-        user_id: user.id,
-        document_ids: body.documentIds ?? [],
-        history
-      })
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return new Response(`Query service unreachable: ${message}`, { status: 502 })
-  }
-
-  const responseBody = await upstream.text()
-
-  let responseJson: { answer?: string } | null = null
-  try {
-    responseJson = JSON.parse(responseBody) as { answer?: string }
-  } catch {
-    // Non-JSON upstream body (e.g. a plain-text error) — pass through as-is.
-  }
-
-  if (upstream.ok && responseJson?.answer) {
-    // Must be awaited, not fire-and-forget: this is a plain JSON response
-    // (no stream keeping the function alive afterward), so an un-awaited
-    // write here can be killed mid-flight once the response is returned.
-    await appendQueryExchange(threadId, { query, answer: responseJson.answer })
-  }
-
-  const outBody =
-    upstream.ok && responseJson ? JSON.stringify({ ...responseJson, threadId }) : responseBody
-
-  return new Response(outBody, {
-    status: upstream.status,
-    headers: { 'Content-Type': 'application/json' }
+  // Document ownership is enforced by RLS on the chunk search itself: the
+  // caller's session client can only ever match their own chunks, so a
+  // stray id from someone else's document simply matches nothing.
+  const { answer, sources } = await answerFromDocuments({
+    supabase,
+    query,
+    documentIds: body.documentIds ?? [],
+    history
   })
+
+  // Awaited, not fire-and-forget: this is a plain JSON response with no
+  // stream keeping the function alive, so an un-awaited write can be killed
+  // the moment the response returns.
+  await appendQueryExchange(threadId, { query, answer }).catch((error) => {
+    // History is a convenience for follow-up questions; losing it must not
+    // cost the user the answer they already have.
+    console.error('Could not record query history:', error)
+  })
+
+  return Response.json({ answer, sources, threadId })
 }

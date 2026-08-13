@@ -39,7 +39,7 @@ export default async function DocumentsPage() {
         </div>
       )}
       <DocumentList initialDocuments={documents} serviceOnline={serviceOnline} />
-      <AskDocuments documents={documents} serviceOnline={serviceOnline} />
+      <AskDocuments documents={documents} />
     </div>
   )
 }
