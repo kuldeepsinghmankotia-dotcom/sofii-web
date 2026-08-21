@@ -467,6 +467,35 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
   const conversationMessages = regenerate ? history : [...history, currentMessage]
 
+  // Groq's free tier caps a request at 8000 tokens/minute total, prompt and
+  // completion combined (see SUPPRESS_REASONING above). `history` is the
+  // entire conversation with no bound of its own, and nothing was windowing
+  // it before it got resent to Groq every turn — so a long-running
+  // conversation eventually pushes past that budget on its own, and every
+  // later message in it fails with a 413. Verified from a real production
+  // error: "Requested 8333" against the 8000 limit, on a plain text
+  // request with no image involved. Same failure class the image-history
+  // comment above already describes, just without a fix — this is that fix.
+  // No tokenizer dependency is worth adding just for this: length is
+  // estimated at ~4 characters per token (a standard rule of thumb) and the
+  // budget below is kept well under 8000 to leave room for the system
+  // prompt, tool schemas and completion tokens, none of which this count
+  // covers. Gemini's context window is enormous by comparison, so only the
+  // Groq-bound copy is windowed — toGeminiContents still gets the full
+  // conversationMessages.
+  const GROQ_HISTORY_CHAR_BUDGET = 16000
+  function windowForGroq(messages: ChatMessage[]): ChatMessage[] {
+    let chars = 0
+    let cutoff = messages.length
+    for (let i = messages.length - 1; i >= 0; i--) {
+      cutoff = i
+      chars += messages[i].content.length
+      if (chars > GROQ_HISTORY_CHAR_BUDGET) break
+    }
+    return messages.slice(cutoff)
+  }
+  const groqConversationMessages = windowForGroq(conversationMessages)
+
   // Wraps executeToolCall so every tool invocation is recorded into this
   // reply's provenance, whichever of the three model branches below runs
   // it (Gemini, Groq-with-vision, plain Groq) — recording at each call
@@ -502,11 +531,11 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const baseMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
-    ...conversationMessages.map(
+    ...groqConversationMessages.map(
       (m, i) =>
         ({
           role: m.role,
-          content: toContentParam(m, i === conversationMessages.length - 1)
+          content: toContentParam(m, i === groqConversationMessages.length - 1)
         }) as ChatCompletionMessageParam
     )
   ]
@@ -675,11 +704,11 @@ export async function POST(request: NextRequest): Promise<Response> {
               "Carefully analyze the attached image and describe it factually and thoroughly. Extract and transcribe ALL visible text exactly as shown — including text printed or engraved on an object itself (e.g. brand name, model/collection name, model number, specs on a product's face or packaging), not just surrounding UI text. If the image shows a product, explicitly identify: brand, model/collection name, model number, category, and any visible specifications (materials, size, capacity, movement type, water resistance, etc.). Be precise and complete — this description is used to research the product further, so don't omit details."
             const imageAnalysisMessages: ChatCompletionMessageParam[] = [
               { role: 'system', content: IMAGE_ANALYSIS_SYSTEM_PROMPT },
-              ...conversationMessages.map(
+              ...groqConversationMessages.map(
                 (m, i) =>
                   ({
                     role: m.role,
-                    content: toContentParam(m, i === conversationMessages.length - 1)
+                    content: toContentParam(m, i === groqConversationMessages.length - 1)
                   }) as ChatCompletionMessageParam
               )
             ]
@@ -697,7 +726,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             const descriptionSystemPrompt = `${systemPrompt}\n\nThe user's message included an image. Here is a factual description of what it shows, including any text extracted from it:\n${imageDescription}\n\nIf the user is asking about a product shown in the image (price, specs, or purchase info), don't just look up that exact product: also proactively search for and mention 2-3 comparable competing products in a similar price range with similar specifications, so the user can compare options, not just find the same item at different sellers.`
             const textOnlyMessages: ChatCompletionMessageParam[] = [
               { role: 'system', content: descriptionSystemPrompt },
-              ...conversationMessages.map(
+              ...groqConversationMessages.map(
                 (m) =>
                   ({
                     role: m.role,
