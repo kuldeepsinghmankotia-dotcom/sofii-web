@@ -12,6 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Overriding the defaults drops ESLint's own built-in ignores too
+    // (node_modules, dotfiles), so they need restating here.
+    "node_modules/**",
+    ".vercel/**",
+    "services/**",
+    "supabase/.temp/**",
   ]),
 ]);
 
