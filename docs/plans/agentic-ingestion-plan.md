@@ -1,49 +1,31 @@
 # Multi-modal agentic ingestion system (Python + LangGraph)
 
-> **Status**: All 10 phases done and verified for real (browser
-> walkthroughs and real REST/JWT-level checks, not just passing tests).
-> This system is feature-complete per this plan. Per-phase detail lives in
-> each phase's own section below (search for "✅ done"); the cross-cutting
-> corrections worth remembering regardless of phase are:
-> - **`redis/redis-stack-server`**, not plain `redis:7-alpine` — the
->   LangGraph Redis checkpointer needs the RediSearch module.
-> - **Gemini free-tier quota is shared and small**: 20 `generateContent`
->   requests/day for `gemini-3.6-flash` (used for OCR vision *and* text
->   generation, e.g. memory extraction) — genuinely exhausted more than
->   once during this session's own testing. `gemini-embedding-001` sits
->   under a separate, unaffected quota. Expect this to bite Phase 8+
->   verification too; the system is designed to degrade gracefully when
->   it does (see Phase 6), not to treat it as a bug.
-> - `supabase gen types typescript --local`, redirected to a file, can
->   capture a stray `Connecting to db 5432` line as line 1, breaking the
->   TS build — check after every regenerate.
-> - **Phase 8's LLM calls use Groq, not Gemini** (`app/clients/groq_client.py`)
->   — a deliberate deviation from earlier phase text that said "reuses the
->   Gemini client," made because of the quota constraint above. Any future
->   phase adding new LLM-call nodes should default to Groq for the same
->   reason, reserving Gemini for embeddings/vision where there's no
->   Groq equivalent yet.
-> - `CREATE OR REPLACE FUNCTION` does **not** replace a function when the
->   parameter list changes — Postgres treats it as a new overload; drop
->   the old one explicitly in a follow-up migration.
-> - **New Postgres functions get `EXECUTE` granted to `PUBLIC` by
->   default** — a `grant ... to service_role` in the same migration does
->   **not** revoke that. Found live in Phase 10 on
->   `match_document_chunks_for_service`: `authenticated` could call it
->   (not exploitable there only because the function isn't `SECURITY
->   DEFINER`, so the underlying table's RLS still applied — incidental,
->   not intentional, protection). Any future `service_role`-only function
->   needs an explicit `revoke execute ... from public` in the same
->   migration that creates it, not as an afterthought.
-> - **`revoke ... from public` is not enough on Supabase Cloud specifically**
->   — the hosted platform has its own `ALTER DEFAULT PRIVILEGES` rule that
->   grants `EXECUTE` to `anon`/`authenticated` individually on every new
->   function, bypassing `PUBLIC` entirely. Local `supabase start` doesn't
->   have this rule, so a local-only grants check can pass while production
->   is still wide open. Always `revoke ... from anon, authenticated`
->   explicitly by name, and **verify any grants/RLS security fix against
->   the actual production database**, not just local — local passing is
->   not sufficient evidence.
+> **Status**: Phase 1 (admin-editable system prompt) is done, verified
+> end-to-end, and deployed to production. Phase 2 (Python service skeleton)
+> is done and verified locally: FastAPI service scaffolded at
+> `services/ingestion-agent/`, structured JSON request logging wired in,
+> shared-secret auth confirmed (401 without it, 200 with it), a Cloudflare
+> **quick** tunnel exposes it publicly, and a real signed-in browser session
+> hit `/api/ingest` → tunnel → Python service and got back a live 200 end
+> to end. Not yet done: this used a free quick tunnel
+> (`*.trycloudflare.com`), whose URL changes on every `cloudflared`
+> restart and isn't production-durable — a named tunnel (Cloudflare
+> account + domain) is a follow-up decision before this is relied on
+> long-term, not before Phase 3 starts. Phase 3 (Redis + router-only graph)
+> is also done and verified: a real LangGraph `StateGraph` with a
+> `router_node` runs end to end against a real Redis instance, and
+> `redis-cli KEYS '*'` confirms genuine checkpoint entries keyed by
+> `job_id` afterward. One correction found while building this: the
+> `AsyncRedisSaver` checkpointer needs the **RediSearch module** for its
+> index (`FT.*` commands) — plain `redis:7-alpine` doesn't have it and
+> fails with `unknown command 'FT.INFO'`. Use
+> **`redis/redis-stack-server`** instead (same port, drop-in swap). Also
+> note: `IngestionState`'s Pydantic model can't carry a raw `bytes` field
+> through the checkpointer (its JSON serialization path rejects nested
+> bytes) — the magic-byte sniff sample is stored as
+> `sample_bytes_b64: str`, base64-encoded, decoded only inside
+> `router_node`. Phases 4–10 are not started.
+> Update this line as phases land — this file doesn't auto-track progress.
 >
 > **Admin account** was changed after Phase 1 shipped: it's
 > `kuldeepsinghmankotia@gmail.com`, not `amit21aim@gmail.com` as written
@@ -282,11 +264,11 @@ in-memory call returned successfully.
 
 ---
 
-## Phase 4 — Simple-format ingestion end to end (.txt/.html/.csv, no OCR) ✅ done
+## Phase 4 — Simple-format ingestion end to end (.txt/.html/.csv, no OCR)
 
 The first phase that actually persists something and is user-visible.
 
-**Built:**
+**Build:**
 - Migration `multi_modal_documents`: `documents` gets `source_type`,
   `ingested_by` ('typescript'|'python'), `metadata jsonb`.
   `document_chunks` gets `modality`, `metadata jsonb` (houses per-modality
@@ -311,15 +293,9 @@ The first phase that actually persists something and is user-visible.
   `pandas`, `python-multipart`, `supabase` (supabase-py) to dependencies.
 - **Node-level Pydantic validation**: each extractor returns a small model
   (e.g. `ExtractedTextResult`) that validates before the node returns — an
-  empty extraction raises `ValidationError`, same spirit as the existing
-  TS upload route's "delete the document rather than leave an empty,
-  unsearchable one behind" guard. Simplified from the original design:
-  rather than a dedicated `failed_node` branch inside the graph, any node
-  exception (validation or otherwise) simply propagates up through
-  `graph.ainvoke` and is caught by one try/except in
-  `app/routers/ingest.py`'s background task, which marks the
-  `ingestion_jobs` row `failed` with the exception message — same
-  end-user behavior, less graph structure.
+  empty extraction raises, routing to a `failed_node`, same spirit as the
+  existing TS upload route's "delete the document rather than leave an
+  empty, unsearchable one behind" guard.
 - **Final-output Pydantic validation**: `validate_output_node` runs an
   `IngestionResult` model (`chunks: list[ChunkCandidate] =
   Field(min_length=1)`, a validator checking every chunk's embedding is
@@ -332,50 +308,36 @@ The first phase that actually persists something and is user-visible.
 - `src/app/(app)/documents/document-list.tsx` (extended, not a new page):
   accepts `.txt,.html,.csv` alongside the existing PDF path (PDF keeps
   calling the existing `/api/documents/upload`, completely unchanged);
-  non-PDF files call `/api/ingest` then poll status every 2s via one
-  persistent `setInterval` reading a ref-mirrored job list (no
-  `queueMicrotask` needed here — the ESLint `set-state-in-effect` rule
-  only flags synchronous setState during an effect's initial render pass,
-  and this setState only ever runs inside the interval's async callback,
-  well after mount); per-row "Queued…"/"Processing…" badge, inline error
-  + dismiss on failure.
+  non-PDF files call `/api/ingest` then poll status every ~2s
+  (`queueMicrotask`-wrapped `setState`, matching this project's
+  established `react-hooks/set-state-in-effect` workaround — copy the
+  exact pattern from `reminder-poller.tsx`); per-row "Processing…" badge.
 
-**Verified:** uploaded real `.txt`, `.html`, and `.csv` fixtures through
-the actual Documents UI as a real signed-up test user; confirmed
-`documents` rows landed with correct `source_type`/`ingested_by='python'`
-and `document_chunks` rows with correct `modality`
-(`prose`/`prose`/`tabular`). Asked chat three separate questions whose
-answers only existed in the uploaded content (a fact from the `.txt`, a
-fact from the `.html` with a `<script>` tag confirmed stripped, a
-per-row fact from the `.csv`) — all three answered correctly, proving
-`matchDocumentChunks` (unchanged since Phase 1) retrieves Python-authored
-chunks with zero changes on the retrieval side. Confirmed RLS isolation
-with a second real test user: a direct authenticated call to
-`/api/ingest/status/<first user's jobId>` returned a clean 404, and the
-second user's Documents page showed zero documents — not just a policy
-read, an actual attempted cross-user access.
+**Verify:** upload a real `.txt`, `.html`, and `.csv` fixture through the
+actual UI; confirm `documents`/`document_chunks` rows land with correct
+`source_type`/`modality`; ask a chat question whose answer only exists in
+the uploaded `.csv` and confirm the assistant answers it correctly (proves
+retrieval — the existing `matchDocumentChunks` call — works unmodified
+against Python-authored chunks); confirm a second test user can't see the
+first user's `ingestion_jobs` row or resulting `document_chunks` (RLS
+check, attempted as `authenticated` role, not just reading policy
+definitions).
 
 ---
 
-## Phase 5 — .docx support ✅ done
+## Phase 5 — .docx support
 
-**Built:** `app/graph/nodes/extract_docx.py` (python-docx, paragraph text
-only), wired into the router's conditional edge and `unsupported_format`'s
-message table updated to drop the now-stale docx entry. Added
-`python-docx` to dependencies. Extended `/api/ingest/route.ts`'s
-`SUPPORTED_EXTENSIONS` map and `document-list.tsx`'s file input `accept`
-to include `.docx`.
+**Build:** `app/graph/nodes/extract_docx.py` (python-docx), wired into the
+router's conditional edge. Add `python-docx` to dependencies.
 
-**Verified:** uploaded a real multi-paragraph `.docx` fixture through the
-actual UI, confirmed it reached `done` status, and a chat question whose
-answer only existed in that document answered correctly — exactly the
-Phase 4 verification bar, repeated for this format.
+**Verify:** upload a real multi-paragraph `.docx` through the actual UI,
+confirm extraction + retrieval exactly as in Phase 4's verification.
 
 ---
 
-## Phase 6 — OCR ensemble (Gemini + Ollama) with cross-validation ✅ done
+## Phase 6 — OCR ensemble (Gemini + Ollama) with cross-validation
 
-**Built:**
+**Build:**
 - `app/validation/models.py` + `cross_validate.py` — the reusable
   multi-source agreement-check pattern:
   ```python
@@ -412,60 +374,34 @@ Phase 4 verification bar, repeated for this format.
 - UI: `document-list.tsx` accepts `image/*` now too; surfaces a "flagged
   for review" chip when `document_chunks.metadata` shows OCR disagreement.
 
-**Verified:** uploaded a real image (screenshotted from a locally-served
-HTML page — no Pillow available for synthetic image generation) with
-clear printed text; confirmed both `sources` entries populated in
-`document_chunks.metadata`, `agreement_score≈0.99`, `status='agree'`.
-Degraded mode confirmed twice — once when Gemini's real free-tier quota
-was exhausted mid-session, once via a deliberate `gemini_client.vision_ocr`
-failure injection — both times ingestion completed via Ollama alone,
-`status='single_source'`, `flagged_for_review=true`, and the real
-Documents UI rendered the "⚠ Flagged for review" chip (confirmed via
-screenshot). A chat question about the flagged document still answered
-correctly. The Redis OCR cache was confirmed live: a repeat run against
-the same image bytes returned in ~4ms.
+**Verify:** upload an image with clear printed text; confirm both
+`sources` entries populate in `document_chunks.metadata`,
+`agreement_score` >0.9, `status='agree'`; then deliberately stop the local
+`cloudflared`/Ollama process and confirm ingestion still completes with
+`status='single_source'` and `flagged_for_review=true` rather than failing
+outright; confirm the UI shows the chip.
 
 ---
 
-## Phase 7 — Long-term memory bridge ✅ done
+## Phase 7 — Long-term memory bridge
 
-**Built:** `app/memory/long_term.py` — `extract_memory_candidate` calls a
-new `gemini_client.generate_text` helper (text-only `generateContent`,
-same `gemini-flash-latest` model already used for vision) with a prompt
-adapted from `src/lib/memory/extract.ts`'s `extractMemoryCandidate`, capped
-at the first 4000 chars of extracted text. `save_document_memory_node` is
-wired as the graph's actual final node (`persist` → `save_document_memory`
-→ `END`) — deliberately **catches and logs any exception internally**
-rather than raising, so a memory-extraction failure can never fail an
-otherwise-successful ingestion job (proven live, see below). Added
-`'document'` as a new `memories.source` value (migration
-`20260808120000_memory_source_document.sql` — the existing enum was only
-`'manual'`/`'auto'`, and document-sourced facts are a genuinely distinct
-provenance worth surfacing separately) with a matching new "From a
-document" badge in the Memories UI (`memory-list.tsx`), alongside
-`MemorySource` in `src/lib/db/memories.ts`.
-
-**Verified:** confirmed `extract_memory_candidate` directly against real
-document content (a "call me Captain Nova" fixture) — extracted the fact
-correctly. Uploading that fixture through the real UI then hit Gemini's
-daily quota mid-run — which **proved the fire-and-forget design for
-real**: the document still ingested successfully (`documents`/
-`document_chunks` rows, job status `done`) even though the memory node's
-own LLM call failed and logged an error. Since the quota was genuinely
-exhausted for the rest of the session, the DB-write half was verified by
-calling `save_document_memory_node` directly with `extract_memory_candidate`
-swapped for a stub returning a fixed fact (extraction logic itself already
-covered by both the direct real-Gemini call above and 4 unit tests in
-`tests/test_long_term_memory.py`) — confirmed the row landed with
-`source='document'`, the Memories page rendered the real "From a document"
-badge, and a **completely unrelated** later chat message ("what should you
-call me?") correctly replied "Captain Nova" — proving
-`rankMemoriesByRelevance` retrieval works unmodified for Python-sourced
+**Build:** `app/memory/long_term.py` — a node (or post-persist hook) that
+extracts a durable fact from ingested content (mirrors the existing TS
+`extractMemoryCandidate` fire-and-forget pattern in
+`src/lib/memory/extract.ts`) and writes to the **existing** `memories`
+table via `supabase-py` — no new memory storage mechanism. Check
+`supabase/migrations/20260807125335_memory_source.sql` for the existing
+`source` enum shape before adding a new value for ingestion-sourced
 memories.
 
+**Verify:** ingest a document containing an obvious durable fact, confirm
+a row appears in `memories` with a `source` distinguishing it from
+chat-extracted memories, and confirm that fact surfaces in a later,
+unrelated chat via the existing `rankMemoriesByRelevance` retrieval path.
+
 ---
 
-## Phase 8 — Agent layer: query-time routing (new) ✅ done
+## Phase 8 — Agent layer: query-time routing (new)
 
 Everything through Phase 7 gets documents *into* the system. Nothing yet
 lets a user *ask* something and have it routed to a specialized flow —
@@ -473,131 +409,78 @@ that's the actual "Agent Layer" from the reference architecture, and it's
 a different thing from the ingestion router in Phase 3 (that one only
 classifies file format).
 
-**Built:**
-- **New `app/clients/groq_client.py`**, not Gemini, for classification and
-  synthesis — a real-time change from the original plan. Gemini's
-  free-tier `generateContent` quota (20 requests/day, shared across vision
-  *and* text) was already exhausted more than once by this session's own
-  Phase 6/7 testing; Groq is the app's primary chat model with far more
-  headroom and was already integrated. Embeddings still use
-  `gemini-embedding-001` (a separate, unaffected quota) so retrieval stays
-  consistent with the rest of the system.
-- **A necessary correctness fix found while building this**: the existing
-  `match_document_chunks` RPC filters by `auth.uid()`, which is **null**
-  for the Python service's service-role calls (no Supabase session/JWT) —
-  it would have silently returned zero rows for every query, not an error.
-  Added `match_document_chunks_for_service(query_embedding, target_user_id,
-  match_count, modality_filter)` in migration
-  `20260808130000_match_chunks_for_service.sql`, granted **only** to
-  `service_role` (never `authenticated`/`anon` — it takes an arbitrary
-  `target_user_id` with no self-scoping, so only the Python service should
-  ever call it).
-- `app/graph/query_state.py` (`QueryState`, `Citation`) + a **separate**
-  LangGraph (`app/graph/query_build.py`, no checkpointer — a query is one
-  stateless request, nothing to resume), distinct from the ingestion
-  graph.
-- `app/graph/nodes/query_router.py`: classifies intent via Groq with JSON
-  mode, Pydantic-validated against a `Literal` of the four intents; falls
-  back to `answer_from_documents` (the safe default) on any malformed/
-  invalid classification rather than failing the request. Simplified from
-  the original design: the classifier returns intent only, not
-  `target_document_ids` — document selection comes from the API request
-  payload instead (the UI's document-picker), which is far more reliable
-  than asking an LLM to guess IDs from filenames.
-- Four specialized nodes, each fetching real content then synthesizing via
-  Groq: `answer_from_documents_node` (embeds the query, calls the new
-  service-role RPC, cites chunks by number), `summarize_document_node`
-  and `extract_structured_data_node` (require exactly one selected
-  document), `compare_documents_node` (requires 2+). Every
-  `document_chunks` read is filtered by **both** `document_id` and
-  `user_id` — defense-in-depth against the service-role client's RLS
-  bypass, same reasoning as `match_document_chunks`'s own comment.
-  `extract_structured_data_node` validates output via a Pydantic
-  `ExtractedData` model.
-- `POST /query` on the Python service; `src/app/api/query/route.ts`
-  (authenticated proxy, same shared-secret pattern as `/api/ingest`);
-  `src/app/(app)/documents/ask-documents.tsx` — the minimal UI: a query
-  box, a document-selector (toggle chips), and a response panel showing
-  the intent label, answer, and citations. Deliberately not wired into the
-  main chat interface, per the original scope decision.
+**Build:**
+- `app/graph/nodes/query_router.py`: given a user's natural-language
+  request (not a file), classifies intent via a cheap LLM call
+  (reuses the Gemini client) with Pydantic-validated structured output:
+  ```python
+  class QueryIntent(BaseModel):
+      intent: Literal["answer_from_documents", "summarize_document",
+                       "compare_documents", "extract_structured_data"]
+      target_document_ids: list[str] = []
+  ```
+- Specialized nodes per intent, each a small subgraph:
+  - `answer_from_documents_node`: embeds the query, calls the existing
+    `match_document_chunks` RPC via supabase-py, synthesizes an answer
+    with citations back to source chunks.
+  - `summarize_document_node`: fetches all chunks for a specific
+    `document_id`, synthesizes a summary.
+  - `compare_documents_node`: fetches chunks from 2+ documents,
+    synthesizes a comparison.
+  - `extract_structured_data_node`: given a document + a target schema
+    description, extracts structured JSON, Pydantic-validated against
+    that schema (reuses the same node/final-output validation pattern
+    from Phase 4).
+- New endpoint `POST /query` on the Python service.
+- `src/app/api/query/route.ts` (new): authenticated proxy, same
+  shared-secret pattern as `/api/ingest`.
+- **UI scope, deliberately minimal for this phase**: a simple "Ask about
+  your documents" entry point on the Documents page (query input +
+  response display) — not deep integration into the main chat interface.
+  Wiring this into the existing chat flow (e.g. the model transparently
+  deciding when a message is "about a document") is a bigger UX design
+  question, explicitly out of scope here; a follow-on phase if wanted.
 
-**Verified:** uploaded two real documents (the Phase 4 `.txt`/`.csv`
-fixtures) as a real test user, then drove all four intents through the
-actual authenticated `/api/query` proxy: **answer_from_documents**
-correctly returned `ZEBRA-4471-QUARTZ` with a citation back to the right
-chunk; **summarize_document** produced a genuine summary of one document;
-**compare_documents** produced a real comparison referencing both
-documents' actual distinct content; **extract_structured_data** correctly
-pulled all three CSV rows as a JSON array. That last one **failed on the
-first real attempt** — the `ExtractedData` model required `data: dict`,
-but a "list each employee" request naturally produces a JSON *array*, not
-a single object, and Pydantic rejected it. Fixed by widening the field to
-`dict | list[dict]` with a non-empty validator; re-verified working.
-Cross-user rejection confirmed with a second real test user: querying
-across "your documents" found nothing (correct — they have none), and a
-direct attempt to summarize the first user's document by ID returned
-"doesn't belong to you" rather than leaking content.
+**Verify:** ask a question that should trigger each of the four intents
+against real ingested documents (from Phases 4–6's fixtures) and confirm
+each routes to the correct specialized node and produces a sensible,
+correctly-cited answer; confirm a query about a document owned by a
+different user is rejected (RLS-equivalent check on the Python side, since
+`match_document_chunks` already scopes by the caller's rows).
 
 ---
 
-## Phase 9 — Monitoring layer (new) ✅ done
+## Phase 9 — Monitoring layer (new)
 
 Was completely absent before this realignment. Builds on the request
 logging already established in Phase 2 rather than starting from zero.
 
-**Built:**
-- `prometheus-client` dependency; `app/metrics.py` defines the actual
-  metrics (`ingestion_jobs_total{status}`, `ocr_cross_validation_total{status}`,
-  `query_requests_total{intent}`, `node_duration_seconds{node}` histogram)
-  plus a `timed_node(name)` wrapper; `app/routers/metrics.py` exposes
-  `GET /metrics` (shared-secret protected, like every other endpoint on
-  this service) in Prometheus text-exposition format.
-- **`timed_node` is applied centrally at graph-registration time**
-  (`build.py`/`query_build.py` wrap every `add_node(...)` call), not as a
-  per-file decorator — one mechanism guarantees every node in both graphs
-  gets a structured `"node executed"`/`"node failed"` log line (with
-  `duration_ms`) *and* a histogram observation, with no risk of missing
-  one during the "audit every node" pass. Handles both sync node functions
-  (router, chunk, validate_output, unsupported_format) and async ones
-  uniformly via `inspect.isawaitable`.
-- **A real bug found and fixed during the audit**: `app/routers/ingest.py`
-  called `mark_job_processing()` *before* the `try:` block — if that
-  single call failed (reproduced live with a malformed non-UUID `job_id`),
-  the exception propagated straight out of the background task: no
-  `error_message` ever recorded, the job stuck in `pending` forever, and
-  `ingestion_jobs_total` never incremented for the failure. Fixed by
-  moving it inside `try:`, plus a nested try/except around the failure
-  path's own `mark_job_failed()` call (which can fail for the identical
-  reason — the job_id itself is what's invalid) so the background task
-  can now never raise unhandled, in any failure mode.
-- **Explicitly not built**: an actual Prometheus server or Grafana
-  dashboards — optional infrastructure left for the user to separately
-  decide on; this phase only makes the data available in a standard,
-  scrapeable format.
-- Next.js side: confirmed (not just asserted) that `/api/ingest` and
-  `/api/query` already return explicit error `Response`s on every failure
-  path, matching this codebase's actual convention — `console.error` here
-  is reserved for fire-and-forget paths that don't return to the caller
-  (verified by grepping ~10 existing routes). No new logging needed.
+**Build:**
+- `prometheus-client` dependency; `app/routers/metrics.py` exposing
+  `GET /metrics` in Prometheus text-exposition format. Tracked: ingestion
+  jobs by status (counter), OCR cross-validation status distribution
+  (counter, from Phase 6), per-node duration (histogram), query-layer
+  request counts by intent (from Phase 8).
+- Structured-logging audit: confirm every node added in Phases 3–8 logs
+  start/end/duration/status as JSON (not just the HTTP-level middleware
+  from Phase 2) — retrofit any that don't.
+- **Explicitly not built here**: an actual Prometheus server or Grafana
+  dashboards to scrape/visualize `/metrics` — that's optional
+  infrastructure the user would separately decide on and host; this phase
+  only makes the data available in a standard, scrapeable format.
+- Next.js side: the existing `console.error` pattern in API routes
+  already surfaces in Vercel's own log aggregation — confirmed sufficient
+  for the proxy routes, no new work needed there.
 
-**Verified:** `curl $INGEST_SERVICE_URL/metrics` (with the shared secret)
-returns valid Prometheus text format alongside the default Python process
-metrics. Ran a real ingestion job and a real query: `query_requests_total`,
-`node_duration_seconds` (both graphs) confirmed incrementing immediately.
-The `ingestion_jobs_total` gap above was caught specifically *because* a
-first attempt didn't show up in the counter — investigating "why is this
-missing" is what surfaced the bug. After the fix: a valid-UUID job
-correctly increments `status="done"`, and the deliberately-malformed
-`job_id` case (re-run after the fix) now correctly increments
-`status="failed"` with two clearly distinguishable structured error log
-lines, instead of crashing silently. Also caught, incidentally: real
-evidence in the logs that Gemini's quota exhaustion during memory
-extraction (Phase 7) doesn't stop the ingestion job from completing
-successfully — the fire-and-forget design proven live yet again.
+**Verify:** `curl $INGEST_SERVICE_URL/metrics` returns valid Prometheus
+text format; run a few ingestion jobs and a few queries, confirm the
+counters/histograms actually incremented; spot-check that a node failure
+(e.g. a malformed file) produces a structured error log with enough
+context to debug without re-running it.
 
 ---
 
-## Phase 10 — Hardening pass ✅ done
+## Phase 10 — Hardening pass
 
 **Build/verify (no new user-facing surface):**
 - Full `pytest` suite green (`services/ingestion-agent/tests/`), including
@@ -615,108 +498,6 @@ successfully — the fire-and-forget design proven live yet again.
   the documents page load (Server Component) that marks any
   `ingestion_jobs` row stuck in `status='processing'` for over N minutes
   as `failed` with a timeout message, rather than adding a cron.
-
-**Built:**
-- `services/ingestion-agent/tests/test_e2e_ingestion.py`: a real, non-mocked
-  end-to-end test — creates a throwaway `auth.users` row via
-  `supabase.auth.admin.create_user`, uploads a real file to Storage, runs
-  the actual compiled graph (Redis checkpointer included), asserts on the
-  real `documents`/`document_chunks` rows, then deletes the user (cascade
-  cleans up the rest). 38 tests total, all green.
-- `src/lib/db/ingestion-jobs.ts`'s `markStuckIngestionJobsFailed` (10-minute
-  timeout, chosen with real OCR latency data below in hand — comfortably
-  above the slowest observed real job), called once from
-  `documents/page.tsx` on every page load.
-- `services/ingestion-agent/README.md` rewritten with real measured OCR
-  latency (see below) and a dependencies/testing/monitoring overview.
-
-**Verified — and one real security finding, fixed:**
-- **`match_document_chunks_for_service` (added in Phase 8) was callable by
-  the `authenticated` role**, not just `service_role` as documented and
-  intended. Postgres grants `EXECUTE` on a new function to `PUBLIC` by
-  default, and the Phase 8 migration only *added* a grant to
-  `service_role` — it never revoked the implicit `PUBLIC` one. Verified
-  live: an `authenticated` test user's JWT could call the RPC with an
-  arbitrary `target_user_id` and got HTTP 200, not 403. **Not an active
-  data leak** — confirmed by seeding a real second user's chunk via
-  service role and attempting to read it as the first user: it correctly
-  came back empty, because the function isn't `SECURITY DEFINER`, so
-  `document_chunks`'s own RLS policy (scoped to `auth.uid()`) still
-  applied underneath it. That protection was **incidental, not
-  intentional** — it would silently vanish if this function (or a copy of
-  its pattern) were ever changed to `SECURITY DEFINER` for a performance
-  reason without revisiting this. Fixed in migration
-  `20260808150000_revoke_public_service_rpc.sql`
-  (`revoke execute ... from public`); re-verified live afterward:
-  `authenticated` now gets a real `42501`/403 `permission denied`,
-  `service_role` is unaffected. **This fix was itself incomplete on
-  production** — see the note below.
-- Full RLS/grants audit performed with two real `authenticated` JWTs
-  (via GoTrue's password grant, not just service-role assumptions):
-  `documents` (self-insert succeeds, insert claiming another user's
-  `user_id` correctly 403s), `ingestion_jobs` (same pattern, plus
-  cross-user `SELECT` by ID returns empty, not an error), `document_chunks`
-  (a user only ever sees their own rows), Storage `document-uploads`
-  bucket (upload into another user's folder rejected, cross-user download
-  returns 404 not found rather than confirming existence), `memories`
-  (the new `'document'` source value insertable by a user for their own
-  row, matching the existing permissive `'auto'` pattern; an invalid
-  source value correctly rejected by the check constraint).
-- OCR latency measured for real (Apple Silicon Mac, uncached): Gemini
-  vision ~1–4s when not rate-limited; **Ollama (`qwen2.5vl:7b`) local
-  inference: 32–41s** across two separate real images. This is
-  substantially slower than assumed earlier in the session and concretely
-  justifies Phase 4's async/polling design — a synchronous request held
-  open that long would time out or read as broken well before completing.
-- Stuck-job cleanup verified live: seeded a real `ingestion_jobs` row
-  stuck in `status='processing'` with `updated_at` 15 minutes in the past,
-  loaded the real Documents page as that user, confirmed the row flipped
-  to `status='failed'`, `error_message='Ingestion timed out'` — not just
-  that the code looks right, that the actual page load did it.
-
-**Post-deploy correction**: pushing migrations to the real production
-Supabase project surfaced that the `revoke execute ... from public`
-fix above was **incomplete on the hosted platform**. Verified live against
-production directly: after that migration, `authenticated` *still* had
-`EXECUTE` on `match_document_chunks_for_service`. Cause: Supabase Cloud
-projects carry their own `ALTER DEFAULT PRIVILEGES` rule (owned by
-`supabase_admin`) that auto-grants `EXECUTE` on every new public-schema
-function directly to `anon`/`authenticated`/`service_role` as individual
-grants — not through `PUBLIC` — so a `revoke ... from public` alone never
-touches them. Local `supabase start` doesn't reproduce this rule, which is
-exactly why the local-only verification above looked complete but wasn't.
-Fixed for real in migration
-`20260808160000_revoke_anon_authenticated_service_rpc.sql`
-(`revoke execute ... from anon, authenticated`, explicitly by name), and
-this time verified against the **actual production** database — created a
-real throwaway user there, got a real JWT, called the RPC: `403 permission
-denied`. Lesson for any future `service_role`-only function: verifying
-against local Supabase is not sufficient proof for a grants/RLS claim;
-verify against the real hosted project before calling a security fix done.
-
-All 10 phases of this plan are now done and verified for real, including
-against the actual production database, not just local.
-
-## Deployed to production
-
-`INGEST_SERVICE_URL`/`INGEST_SERVICE_SECRET` added to Vercel production
-env, all 7 migrations pushed to the real Supabase project, and the app
-deployed (`vercel --prod`, live at `sofii-web.vercel.app`). One real
-deployment-topology bug found and fixed immediately: this Python service's
-`.env` was still pointed at **local** Supabase from Phase 2 setup — a real
-production upload correctly wrote the file/job to production Storage/DB
-via the Next.js proxy, but this service (the only instance, shared by
-whichever environment points its tunnel URL at it) tried to read them
-from local Postgres/Storage and got `Object not found`. Fixed by pointing
-this service's `.env` at the production project; documented properly in
-`services/ingestion-agent/README.md` since it's a standing operational
-constraint (one instance, one Supabase project at a time), not a one-off
-mistake. Re-verified after the fix with a full real round trip against
-the live production site: real signup, real `.txt` upload through the
-actual deployed UI, ingestion completed, and a chat question answered
-correctly (`ZEBRA-4471-QUARTZ`) — proving the entire chain (browser →
-Vercel production → Cloudflare tunnel → this Mac → production Supabase →
-back to a correct answer) for real, not just each piece in isolation.
 
 ---
 
